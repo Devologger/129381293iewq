@@ -8,6 +8,7 @@ import { createWorkspace, db, saveCredential, updateWorkspace } from "../lib/ser
 import { previewDemo, submitDemo, cancelDemo, reconcileDemo, demoJournal } from "../lib/server/demo-execution.ts";
 import { configureDemoBot, demoBots, tickDemoBot } from "../lib/server/demo-bots.ts";
 import { runTeam, budgetStatus, saveTeamSettings, runScheduledTeams } from "../lib/server/agent-team.ts";
+process.env.TEAM_AI_PROVIDER = "openai";
 const folder = mkdtempSync(join(tmpdir(), "obsidian-advanced-"));
 process.env.TERMINAL_DATA_DIR = folder; process.env.TERMINAL_VAULT_DIR = join(folder, "vault");
 after(() => { db().close(); rmSync(folder, { recursive: true, force: true }); });

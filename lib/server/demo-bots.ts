@@ -2,6 +2,7 @@ import { db } from "./store.ts";
 import { demoAccount, demoClosedCandles, previewDemo, reconcileDemo, submitDemo } from "./demo-execution.ts";
 import { runResearch } from "./research.ts";
 import type { Research } from "../terminal-engine.ts";
+import { saveStrategyEvidence } from "./strategy-memory.ts";
 type DemoBot = { symbol: string; timeframe: string; enabled: boolean; notional: number; lastBar: number; lastOrder: string | null; research: Research | null; updatedAt: string | null; error: string | null; tolerance: number };
 export function demoBots(workspaceId: string): DemoBot[] { return (db().prepare("SELECT state FROM demo_bots WHERE workspace_id=?").all(workspaceId) as { state: string }[]).map(r => JSON.parse(r.state)); }
 function save(workspaceId: string, bot: DemoBot) { db().prepare("INSERT INTO demo_bots VALUES (?,?,?) ON CONFLICT(symbol) DO UPDATE SET state=excluded.state WHERE demo_bots.workspace_id=excluded.workspace_id").run(bot.symbol, workspaceId, JSON.stringify(bot)); return bot; }
@@ -46,6 +47,7 @@ export async function tickDemoBot(workspaceId: string, bot: DemoBot, fetcher: ty
       const candles = await demoClosedCandles(current.symbol, current.timeframe, fetcher), bar = candles.at(-1)!;
       if (bar.time > current.lastBar) {
         const report = await researcher(candles, current.tolerance, true), level = report.snapshot.display_levels.at(-1)?.price;
+        if (report.strategy_lab) saveStrategyEvidence(workspaceId, `binance-demo:perpetual:${current.symbol}:${current.timeframe}`, report.strategy_lab, "binance-demo");
         const latest = demoBots(workspaceId).find(b => b.symbol === current!.symbol);
         if (latest?.enabled && latest.timeframe === current.timeframe && latest.notional === current.notional && current.lastBar > 0 && !position && level && candles.at(-2)!.close < level && bar.close >= level) {
           // Claim this bar before exchange I/O. Crash recovery cannot repeat the signal.

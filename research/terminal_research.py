@@ -93,7 +93,11 @@ def main():
     auto_apply = payload.get("auto_apply", False)
     if not isinstance(auto_apply, bool):
         raise ValueError("Invalid auto_apply flag")
-    print(json.dumps(research(candles, tolerance, auto_apply), allow_nan=False))
+    result = research(candles, tolerance, auto_apply)
+    if len(candles) >= 300:
+        from research.strategy_lab import research as compare_strategies
+        result["strategy_lab"] = compare_strategies(candles)
+    print(json.dumps(result, allow_nan=False))
 
 
 if __name__ == "__main__":

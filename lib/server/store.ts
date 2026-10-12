@@ -41,6 +41,9 @@ export function db() {
     CREATE TABLE IF NOT EXISTS team_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, cache_key TEXT NOT NULL, state TEXT NOT NULL, created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS team_settings (workspace_id TEXT PRIMARY KEY, state TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS team_locks (workspace_id TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
+  connection.exec(`CREATE TABLE IF NOT EXISTS strategy_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, context_key TEXT NOT NULL, state TEXT NOT NULL, created INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS provider_blocks (identity TEXT PRIMARY KEY, reason TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS free_model_cooldowns (model TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
   state.obsidianDatabases.set(directory, connection);
   return connection;
 }
@@ -66,7 +69,7 @@ export function updateWorkspace(id: string, change: (workspace: Workspace) => Wo
 export function workspaceIds() { return (db().prepare("SELECT id FROM workspaces").all() as { id: string }[]).map(r => r.id); }
 export function contextKey(c: Context) { return `${c.exchange}:${c.market}:${c.symbol}:${c.timeframe}:${c.source}`; }
 
-export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "DISCORD_PUBLIC_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
+export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "DISCORD_PUBLIC_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
 export function credential(name: string): string | undefined {
   if (process.env[name]) return process.env[name];
   const row = db().prepare("SELECT encrypted FROM credentials WHERE name=?").get(name) as { encrypted: string } | undefined;

@@ -6,7 +6,7 @@ A standalone trading dashboard and paper and Binance USD-M demo automation servi
 
 ## Start
 
-Requires Node 24 and Python 3.12. Python research uses only the standard library; there is no Python dependency installation or separate API process.
+Requires Node >=24 and Python >=3.12 (validated in cloud on Node 24 / Python 3.12). Windows Python 3.14 can be selected with `npm.cmd run setup:windows`. See the [Windows guide](docs/WINDOWS-QUICKSTART.md). Python research uses only the standard library; there is no Python dependency installation or separate API process.
 
 ```bash
 npm ci
@@ -23,7 +23,7 @@ Charts in sample mode, paper execution, strategy research, server persistence, a
 When ready, use private environment settings or an ignored `.env.local` file. `.env.example` lists optional variables. To use the app’s credential form, set `TERMINAL_ADMIN_PASSWORD` to a private password of at least 16 characters, restart, then unlock **Connections → Private integration settings**. Submitted values are encrypted with AES-256-GCM in the server ledger and are never returned by the API. Environment-managed bindings cannot be overwritten by that form.
 
 - **Discord:** `DISCORD_PUBLIC_KEY` is the application's Public Key from Discord Developer Portal → General Information. It is not the bot token. It verifies incoming slash commands; no bot token is required for this interaction endpoint.
-- **AI research:** `TRADE_AI_KEY` enables the three-member research council. `TRADE_AI_MODEL` defaults to `gpt-5-mini`. Owner authentication is required, requests use `store: false`, and agents have no execution tools. All AI endpoints share a persistent budget.
+- **AI research:** The three-member council defaults to remote free inference through OpenRouter. Add a free-provider key as `TEAM_REMOTE_KEY`; no OpenAI billing or local model is required. `TRADE_AI_KEY` is used only when `TEAM_AI_PROVIDER=openai` is explicitly selected. Owner authentication is required, requests use `store: false`, and agents have no execution tools. All AI endpoints share a persistent budget.
 - **Binance demo:** `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` enable signed USD-M demo verification and exchange execution. These must be raw signing credentials, not proxy placeholders. They can be entered privately later. Verification reads balances without placing orders. The separate Binance demo desk supports market/limit orders, reduce-only closes, cancellation, reconciliation, and opt-in demo automation. All execution destinations are fixed to `demo-fapi.binance.com`; real-money execution is unavailable.
 - **Deployment:** set `TERMINAL_PUBLIC_ORIGIN` to the exact HTTPS origin behind a reverse proxy, so origin validation and secure cookies work. Do not expose credential configuration over remote HTTP.
 
@@ -77,11 +77,17 @@ Use a dedicated demo account. The demo desk sees that entire exchange account; a
 
 ## Research council and costs
 
-Run Strategy Lab research, then open **AI research team**. Select saved chart or Binance demo bot evidence, ask a question, and convene the strategy researcher, risk reviewer and vault curator. Each role calls OpenAI with a bounded evidence summary and earlier reviews. Full discussion and a linked note are saved to the Obsidian workspace.
+Run Strategy Lab research, then open **AI research team**. Select saved chart or Binance demo bot evidence, ask a question, and convene the strategy researcher, risk reviewer and vault curator. Each role calls the selected remote provider with bounded evidence, Obsidian memory, and earlier reviews. Free routing requires zero advertised model prices and never falls back to paid OpenAI. Full discussion and a linked note are saved to the Obsidian workspace.
 
-Defaults: $1/day, $0.20/run, 30 provider attempts/day, 1000 output tokens/call. SQLite persists usage/reservations across restarts and shares limits across workspaces. Identical completed briefings are cached for six hours. Unknown provider outcomes retain reservations; only an explicit rate-limit rejection allows one retry. Premium risk review requires configured model prices, an allow switch, and an explicit escalation request. Automatic schedules never escalate.
+Free mode defaults to nine provider attempts/day and 1000 output tokens/call. Explicit paid mode also enforces $1/day and $0.20/run accounting limits; `.env.example` retains the conservative nine-attempt cap. SQLite persists usage/reservations across restarts and shares limits across workspaces. Identical completed briefings are cached for six hours. Unknown provider outcomes retain reservations; only an explicit rate-limit rejection allows one retry. Premium review is disabled in free mode. Explicit paid mode requires configured model prices, an allow switch, and an escalation request. Automatic schedules never escalate.
 
-Prices are conservative **configured accounting estimates**, not provider invoices. Verify rates for your selected model. Codex development-session charges are separate and cannot be metered by this app. [Full budget, schedule and ECC instructions](docs/AGENT-TEAM.md).
+Prices are conservative **configured accounting estimates**, not provider invoices. Verify rates for your selected model. Codex development-session charges are separate and cannot be metered by this app. [Free-provider comparison, routing and research details](docs/FREE-AI-AND-STRATEGIES.md). [Schedule and ECC instructions](docs/AGENT-TEAM.md).
+
+## Strategy explorer and Obsidian learning
+
+Compare six research families: Fibonacci reclaim, volume-profile VAH retest, POC reclaim, Donchian breakout, EMA pullback and RSI mean reversion. Fixed-range controls show POC/VAL/VAH and estimated high-volume zones. Profiles are OHLCV approximations, not trade-level volume-at-price. Training-only selection, chronological validation/final holdouts, doubled-cost stress tests and sample-count gates can veto candidates. New families are not deployed automatically.
+
+Bounded research includes these comparisons when 300+ candles are available. Automatic paper learning and demo research refresh evidence on new bars without LLM calls. Source-labeled notes and `Learning Memory.md` accumulate under the workspace’s Obsidian Research folder; the council reads that and optional `Agent Memory.md` on subsequent reviews. This is retrieval-based memory, not weight fine-tuning or proof of monthly profits. [Methodology and limits](docs/FREE-AI-AND-STRATEGIES.md).
 
 ## JARVIS-inspired voice interface
 

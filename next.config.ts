@@ -4,7 +4,7 @@ const development = process.env.NODE_ENV !== "production";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  outputFileTracingIncludes: { "/api/terminal/research": ["./research/*.py"] },
+  outputFileTracingIncludes: { "/api/terminal/research": ["./research/*.py"], "/api/terminal/strategy-lab": ["./research/*.py"] },
   outputFileTracingExcludes: { "**/*": [".runtime/**/*", ".env*", ".git/**/*", "obsidian-vault/Research/**/*"] },
   async headers() {
     return [{ source: "/:path*", headers: [

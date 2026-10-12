@@ -1,6 +1,6 @@
 # Obsidian research council and ECC
 
-The app has a real server-side OpenAI agent pipeline, not a simulated team UI:
+The app has a real server-side remote AI agent pipeline, not a simulated team UI:
 strategy researcher → independent risk reviewer → vault curator. Each member
 receives the authoritative saved research and a bounded discussion from earlier
 members. The curator's briefing and every member's response are written to the
@@ -10,14 +10,14 @@ learning remains separate.
 
 ## Runtime operation
 
-1. Add an OpenAI API key privately and unlock Connections.
+1. Add a remote free-provider API key (`TEAM_REMOTE_KEY`) privately and unlock Connections.
 2. Choose a market/timeframe and run Strategy Lab research.
 3. Open AI research team. Load budget & history, then convene the team.
 4. Read all three reviews and the generated Obsidian note.
 5. Optionally enable scheduled reviews (minimum 60 minutes). The schedule is
    persistent and the server must remain running. It uses the selected saved
    research; enable bounded paper learning separately to refresh that evidence.
-6. Premium review requires both configured escalation prices/model and the
+6. Premium review is unavailable in free mode; explicit paid mode requires both configured escalation prices/model and the
    explicit allow switch. Only the risk reviewer escalates when requested;
    schedules never do so automatically.
 
@@ -32,9 +32,9 @@ for six hours; new research, journal evidence or questions invalidate it.
 The SQLite `ai_calls` table stores per-attempt reservations, model, UTC day,
 workspace/run/role, input/output/cached token usage, charged estimate and status.
 Limits are shared across all workspaces using the server's API credential.
-Defaults: $1/day, $0.20/run, 30 attempts/day, 1000 output tokens per call.
+Free mode defaults to nine attempts/day and 1000 output tokens per call; it has no paid fallback. Explicit paid mode retains $1/day and $0.20/run accounting limits. See [current free-routing instructions](FREE-AI-AND-STRATEGIES.md).
 
-Rates default to conservative estimates of $1/million input tokens and
+For explicit paid mode only, rates default to conservative estimates of $1/million input tokens and
 $5/million output tokens, with cached input charged at $1/million. Verify and
 set rates for your actual model before use. These are accounting estimates,
 not live pricing or provider invoices. Price ceilings only bound money if the
@@ -55,7 +55,7 @@ Configuration in private environment settings or `.env.local`:
 ```dotenv
 TEAM_DAILY_BUDGET_USD=1
 TEAM_RUN_BUDGET_USD=0.20
-TEAM_DAILY_CALL_LIMIT=30
+TEAM_DAILY_CALL_LIMIT=9
 TEAM_INPUT_USD_PER_MILLION=1
 TEAM_OUTPUT_USD_PER_MILLION=5
 TEAM_CACHED_INPUT_USD_PER_MILLION=1
