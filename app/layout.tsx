@@ -16,13 +16,13 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: "Obsidian",
-    template: "%s · Obsidian",
+    default: "Penguin",
+    template: "%s · Penguin",
   },
   description:
     "A standalone multi-market trading, strategy research, and Obsidian knowledge workspace.",
   applicationName:
-    "Obsidian",
+    "Penguin",
   robots: {
     index: false,
     follow: false,

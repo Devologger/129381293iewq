@@ -13,7 +13,7 @@ if(!python)throw new Error('Python 3.12 or newer was not found by the Windows py
 set('TERMINAL_PYTHON',JSON.stringify(python.replaceAll('\\','/')));
 const password=text.match(/^TERMINAL_ADMIN_PASSWORD=(.*)$/m)?.[1].trim();
 if(!password || password==='""')set('TERMINAL_ADMIN_PASSWORD',randomBytes(24).toString('base64url'));
-if(!/^TEAM_AI_PROVIDER=(openrouter_free|free_remote)$/m.test(text))set('TEAM_AI_PROVIDER','openrouter_free');
+if(!/^TEAM_AI_PROVIDER=(openrouter_free|free_remote|freeride)$/m.test(text))set('TEAM_AI_PROVIDER','openrouter_free');
 writeFileSync(file,text,{mode:0o600});
 console.log('Local Python configured. Private settings preserved in .env.local.');
 console.log('Open .env.local privately in Notepad to read your settings password. No keys were displayed or sent.');

@@ -1,4 +1,4 @@
-# Obsidian Trading Workspace
+# Penguin Trading Workspace
 
 A standalone trading dashboard and paper and Binance USD-M demo automation service with multi-market charts, bounded Fibonacci learning, a JARVIS-inspired voice console, an Obsidian research vault, a budgeted OpenAI research council, and signed Discord controls.
 
@@ -109,3 +109,19 @@ npm run build
 Tests exercise costs, collateral conservation, risk rejection, provider response schemas, source isolation, signed Discord access, persistent ledger transactions, encrypted settings, server learning/entry deduplication/protection, Binance demo orders/uncertainty/filter/exposure controls, bot bar deduplication and paused protection, agent budgets/cache/retries/usage, and chronological research. External exchange requests, real OpenAI responses, Discord registration, and microphone recognition need their optional runtime prerequisites. Binance demo verification and execution are covered with controlled responses, not real keys.
 
 The application build may emit a Turbopack tracing warning for the Python subprocess; the supported runtime layout keeps the bundled Python sources alongside the Node app. The build finishes by filtering private runtime, environment, and generated-note paths from all tracing manifests, including the instrumentation trace which Next's route exclusions do not cover. Keep persistent data as runtime storage; do not package `.runtime`, private notes, or `.env.local` as source artifacts.
+
+## Penguin + real FreeRide gateway
+
+Optional FreeRideV3 is now integrated, pinned to a reviewed upstream revision. It runs a private routing service and uses remote OpenRouter / optional Groq inference. [Detailed Windows installation and troubleshooting](docs/FREERIDE-WINDOWS.md). After configuring `TEAM_AI_PROVIDER=freeride`, run `npm run freeride:install` once and keep `npm run freeride:start` running alongside Penguin. Existing encrypted OpenRouter keys are reused. Other providers from FreeRide’s table are not enabled by this adapter.
+
+The research council’s **Check AI connection** button checks provider metadata or gateway capabilities without an inference call. Provider failures now explain privacy, regional, authentication and quota restrictions without recording raw error bodies. A 403 still needs the provider’s actual diagnosis; routing cannot bypass an account restriction.
+
+Penguin’s animated cyan HUD respects reduced-motion preferences. The voice interface offers installed browser voices, rate and pitch controls, preferring a British voice when available. It does not include the actor’s Iron Man voice. Obsidian remains the knowledge integration: the vault view reads private linked notes, edits bounded `Agent Memory.md`, and generates a real Canvas plus a Bases table from workspace notes. Memory changes affect the next uncached council run; this is retrieval context, not weight training. Existing runtime files, cookies, encrypted keys and vault paths are preserved by the rename. Existing `/obsidian` Discord commands are accepted alongside the new `/penguin` command; registering the updated JSON is a separate Discord setup step.
+
+Gateway integration checks (after installation):
+
+```powershell
+.runtime/freeride-venv/Scripts/python.exe tests/freeride-check.py
+```
+
+On Linux, use `.runtime/freeride-venv/bin/python tests/freeride-check.py`. These checks run the actual installed FreeRide engine with synthetic upstream responses; they do not spend provider quota or use real keys.

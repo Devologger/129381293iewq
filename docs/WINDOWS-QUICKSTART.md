@@ -108,3 +108,7 @@ The council retrieves these notes on future reviews; no LLM weights are trained.
 
 Read [free AI and research details](FREE-AI-AND-STRATEGIES.md) and the main
 [README](../README.md) for Binance demo, Discord, voice and persistence.
+
+## Optional real FreeRide routing
+
+See [Penguin + FreeRide Windows guide](FREERIDE-WINDOWS.md) for the pinned gateway install, private key reuse, optional Groq fallback, two-window startup, and 403 troubleshooting. No local AI model is installed.

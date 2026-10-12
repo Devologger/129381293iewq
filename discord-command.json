@@ -1,6 +1,6 @@
 {
-  "name": "obsidian",
-  "description": "Standalone Obsidian trading workspace",
+  "name": "penguin",
+  "description": "Standalone Penguin trading workspace",
   "options": [
     {"type": 1, "name": "help", "description": "Show supported commands"},
     {"type": 1, "name": "status", "description": "Read your linked paper account status"},

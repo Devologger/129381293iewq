@@ -1,5 +1,5 @@
 {
-  "name": "obsidian-trading-workspace",
+  "name": "penguin-trading-workspace",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,9 @@
     "lint": "eslint app components lib instrumentation.ts next.config.ts",
     "test": "node --test tests/*.test.mjs",
     "test:research": "python3 -m unittest discover -s tests -p 'test_*.py'",
-    "setup:windows": "node scripts/setup-windows.mjs"
+    "setup:windows": "node scripts/setup-windows.mjs",
+    "freeride:install": "node scripts/freeride.mjs install",
+    "freeride:start": "node scripts/freeride.mjs start"
   },
   "dependencies": {
     "lightweight-charts": "5.2.0",

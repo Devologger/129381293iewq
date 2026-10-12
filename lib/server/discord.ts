@@ -12,11 +12,11 @@ export async function discordInteraction(request: Request) {
     if (!verify(null, Buffer.from(timestamp + body), publicKey, Buffer.from(signature, "hex"))) return Response.json({ error: "Invalid signature" }, { status: 401 });
     const interaction = JSON.parse(body);
     if (interaction.type === 1) return Response.json({ type: 1 });
-    if (interaction.type !== 2 || interaction.data?.name !== "obsidian") return Response.json({ error: "Unsupported command" }, { status: 400 });
+    if (interaction.type !== 2 || !["penguin", "obsidian"].includes(interaction.data?.name || "")) return Response.json({ error: "Unsupported command" }, { status: 400 });
     const userId = interaction.member?.user?.id || interaction.user?.id;
     const command = interaction.data.options?.[0]?.name;
     const reply = (content: string) => Response.json({ type: 4, data: { content: content.slice(0, 1900), flags: 64 } });
-    if (command === "help") return reply("Obsidian commands: link, status, positions, pause, resume. These control the standalone paper ledger. Generate a one-time link code in dashboard Connections. All keys can be added later; no live exchange orders are sent.");
+    if (command === "help") return reply("Penguin commands: link, status, positions, pause, resume. These control the standalone paper ledger. Generate a one-time link code in dashboard Connections. All keys can be added later; no live exchange orders are sent.");
     if (!userId || !/^\d{5,25}$/.test(userId)) return reply("Discord user identity is missing.");
     if (command === "link") {
       const code = interaction.data.options[0].options?.find((o: { name: string }) => o.name === "code")?.value;

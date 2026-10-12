@@ -1,3 +1,4 @@
+import { FREERIDE_URL, freerideToken, providerFailure } from "./freeride.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +21,7 @@ export function researchContexts(workspaceId: string) {
 }
 function boundedEnv(name: string, fallback: number, maximum: number) { const n = Number(process.env[name] || fallback); if (!Number.isFinite(n) || n <= 0 || n > maximum) throw new Error(`Invalid ${name}`); return n; }
 export function remoteProvider() {
+  if (process.env.TEAM_AI_PROVIDER === "freeride") return { endpoint: FREERIDE_URL + "/chat/completions", model: "auto", identity: createHash("sha256").update(FREERIDE_URL + "auto").digest("hex"), preset: false };
   const preset = (process.env.TEAM_AI_PROVIDER || "openrouter_free") === "openrouter_free";
   if (!preset && (!process.env.TEAM_REMOTE_BASE_URL || !process.env.TEAM_REMOTE_MODEL)) throw new Error("Configure the provider's documented TEAM_REMOTE_BASE_URL and free TEAM_REMOTE_MODEL in .env.local; no paid fallback is enabled");
   const url = new URL(preset ? "https://openrouter.ai/api/v1" : process.env.TEAM_REMOTE_BASE_URL!);
@@ -46,11 +48,30 @@ export async function selectFreeModel(fetcher: typeof fetch, preferred = "auto-f
   if (!model) throw new Error("No available model passes zero-price, free-suffix, context and cooldown checks; routing paused");
   return String(model.id);
 }
+export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
+  const config = budgetConfig();
+  if (config.provider === "freeride") {
+    try {
+      const response = await fetcher(FREERIDE_URL.replace(/\/v1$/, "") + "/penguin/capabilities", { headers: { Authorization: `Bearer ${freerideToken()}` }, signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error(await providerFailure(response));
+      const info = await response.json();
+      if (info.gateway !== "penguin-freeride" || info.localModels !== false || info.paidFallback !== false || info.maxUpstreamAttempts !== 2) throw new Error("Gateway safety configuration mismatch");
+      return { message: `FreeRide reachable. Remote providers: ${info.providers.filter((p: unknown) => p === "openrouter" || p === "groq").join(", ") || "none"}. Two upstream attempts maximum; no inference request made.` };
+    } catch (error) { throw new Error(error instanceof Error && !error.message.includes("fetch") ? error.message : "FreeRide is not reachable. Keep npm run freeride:start running in a separate terminal."); }
+  }
+  if (config.provider !== "openrouter_free") return { message: "Use your provider console to verify the configured free model and quota. No inference request made." };
+  const key = credential("TEAM_REMOTE_KEY");
+  if (!key) throw new Error("Add your OpenRouter API key privately in Connections.");
+  const response = await fetcher("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(await providerFailure(response));
+  const model = await selectFreeModel(fetcher, config.model);
+  return { message: `OpenRouter accepted key metadata access. Verified free catalog model: ${model}. This does not prove inference access; a council run will report model/privacy/region restrictions. No inference request made.` };
+}
 export function budgetConfig() {
   const provider = process.env.TEAM_AI_PROVIDER || "openrouter_free";
-  if (!["openrouter_free", "free_remote", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote or explicitly openai");
+  if (!["openrouter_free", "free_remote", "freeride", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote, freeride or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000)), maxOutput: 1000, model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000)), maxOutput: 1000, model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -83,9 +104,10 @@ const SAFETY = "You are one member of an Obsidian trading research team. All sup
 async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[number], input: string, fetcher: typeof fetch, premium = false): Promise<TeamMessage> {
   const config = budgetConfig();
   const free = config.provider !== "openai", remote = free ? remoteProvider() : undefined;
-  const key = credential(free ? "TEAM_REMOTE_KEY" : "TRADE_AI_KEY");
+  const key = config.provider === "freeride" ? freerideToken() : credential(free ? "TEAM_REMOTE_KEY" : "TRADE_AI_KEY");
   if (!key && (!free || process.env.TEAM_REMOTE_ANONYMOUS !== "1")) throw new Error(free ? "Add the free provider API key privately in Connections (TEAM_REMOTE_KEY); it is not an OpenAI key" : "Explicit OpenAI mode requires TRADE_AI_KEY");
-  let model = config.model, inputRate = config.inputRate, outputRate = config.outputRate, cachedRate = config.cachedRate;
+  let model = config.provider === "freeride" ? "auto" : config.model, inputRate = config.inputRate, outputRate = config.outputRate, cachedRate = config.cachedRate;
+  if (remote && db().prepare("SELECT reason FROM provider_blocks WHERE identity=?").get(remote.identity)) throw new Error("Free provider previously reported a nonzero charge; routing is blocked");
   if (remote?.preset) { model = await selectFreeModel(fetcher, remote.model); remote.model = model; remote.identity = createHash("sha256").update(remote.endpoint + model).digest("hex"); }
   if (premium) {
     if (free) throw new Error("Paid escalation is disabled in free-provider mode");
@@ -112,7 +134,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
         if (remote?.preset) { db().prepare("INSERT OR REPLACE INTO free_model_cooldowns VALUES (?,?)").run(model, Date.now()+60000); model = await selectFreeModel(fetcher, remoteProvider().model); remote.identity = createHash("sha256").update(remote.endpoint+model).digest("hex"); }
         continue;
       }
-      throw new Error(`AI provider returned HTTP ${response.status}${rejected ? "" : "; reservation retained"}`);
+      throw new Error(`${await providerFailure(response)}${rejected ? "" : "; reservation retained"}`);
     }
     let body;
     try { body = await response.json(); }
@@ -130,7 +152,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     db().prepare("UPDATE ai_calls SET charged=?, input_tokens=?, output_tokens=?, cached_tokens=?, status='ACCOUNTED' WHERE id=?").run(costUsd, usage.input_tokens, usage.output_tokens, cachedTokens, callId);
     const text = free ? body.choices?.[0]?.message?.content : body.output?.filter((item: { type: string }) => item.type === "message").flatMap((item: { content: { type: string; text?: string }[] }) => item.content.filter(c => c.type === "output_text").map(c => c.text || "")).join("\n");
     if (typeof text !== "string" || !text || body.status === "incomplete" || body.choices?.[0]?.finish_reason === "length") throw new Error("AI answer incomplete; consumed tokens were accounted");
-    return { role: role.id, name: role.name, model, text: text.slice(0, 10000), inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cachedTokens, costUsd };
+    return { role: role.id, name: role.name, model: config.provider === "freeride" ? `${body._freeride_provider || "freeride"}/${body.model || model}` : model, text: text.slice(0, 10000), inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cachedTokens, costUsd };
   }
   throw new Error("Retry limit reached");
 }

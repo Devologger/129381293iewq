@@ -1,4 +1,4 @@
-import { budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
+import { diagnoseProvider, budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 export const runtime = "nodejs";
 export async function GET(request: Request) {
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
   try {
     const text = await request.text(); if (text.length > 5000) throw new Error("Payload too large");
     const data = JSON.parse(text), id = workspaceSession(request).id;
+    if (data.action === "diagnose") return Response.json(await diagnoseProvider());
     if (data.action === "settings") return Response.json(saveTeamSettings(id, data));
     if (data.action === "run" && typeof data.contextKey === "string" && (data.escalation === undefined || typeof data.escalation === "boolean")) return Response.json(await runTeam(id, data.contextKey, data.question, data.escalation === true));
     throw new Error("Unsupported team action");

@@ -69,7 +69,7 @@ export function updateWorkspace(id: string, change: (workspace: Workspace) => Wo
 export function workspaceIds() { return (db().prepare("SELECT id FROM workspaces").all() as { id: string }[]).map(r => r.id); }
 export function contextKey(c: Context) { return `${c.exchange}:${c.market}:${c.symbol}:${c.timeframe}:${c.source}`; }
 
-export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "DISCORD_PUBLIC_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
+export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "GROQ_API_KEY", "DISCORD_PUBLIC_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
 export function credential(name: string): string | undefined {
   if (process.env[name]) return process.env[name];
   const row = db().prepare("SELECT encrypted FROM credentials WHERE name=?").get(name) as { encrypted: string } | undefined;

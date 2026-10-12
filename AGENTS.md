@@ -1,4 +1,4 @@
-# Obsidian standalone trading workspace
+# Penguin standalone trading workspace
 
 This repository is the application. `/workspace/312897ads` is a reference checkout only: never import it at runtime or redirect users into its account flows.
 
@@ -17,3 +17,5 @@ The runtime research council has no trading tools. All AI paths must use its ato
 Checks: `npm test`, `npm run test:research`, `npm run lint`, `npm run build`. README.md describes startup and late credential configuration.
 
 Remote free inference is the default. Never automatically switch to paid OpenAI, paid models, or local model hosting. Free model selection must pass catalog price and quota gates. OHLCV profiles are estimates, not trade-level evidence. Obsidian memory is retrieval context, not neural-weight fine-tuning. New strategy families remain research-only until separately authorized and forward validated.
+
+Optional FreeRide runs only through the managed private loopback adapter. Preserve strict free catalogs, two upstream attempts per gateway request, no retries after uncertain outcomes, encrypted key reuse, no local models and no paid fallback. The shared app call ledger counts gateway requests; document upstream attempt accounting separately.
