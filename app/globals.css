@@ -1,0 +1,7 @@
+@import "tailwindcss";
+:root { color-scheme: dark; --cmr-bg: #0c0f11; }
+@theme inline { --font-sans: var(--font-geist-sans); --font-mono: var(--font-geist-mono); }
+* { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #65707955 transparent; }
+html { min-height: 100%; background: #0c0f11; }
+body { margin: 0; color: #e5e7e8; background: #0c0f11; font-family: var(--font-geist-sans), Arial, sans-serif; }
+::selection { background: #d3ad6540; color: white; }

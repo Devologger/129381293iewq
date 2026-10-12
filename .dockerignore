@@ -1,0 +1,8 @@
+.git
+node_modules
+.next
+.runtime
+.env*
+obsidian-vault/Research
+__pycache__
+*.pyc
