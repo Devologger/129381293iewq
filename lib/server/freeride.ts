@@ -8,7 +8,7 @@ export function freerideToken() {
   const path = join(dataDirectory(), "freeride-gateway.token");
   try { writeFileSync(path, randomBytes(32).toString("hex"), { flag: "wx", mode: 0o600 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const token = readFileSync(path, "utf8");
+  const token = readFileSync(/* turbopackIgnore: true */ path, "utf8");
   if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Invalid private FreeRide gateway token");
   return token;
 }

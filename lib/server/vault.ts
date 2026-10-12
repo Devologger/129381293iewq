@@ -21,13 +21,13 @@ function safeNote(directory: string, name: string) {
 }
 export function vaultNotes(id: string) {
   const { directory } = workspaceFolder(id);
-  return readdirSync(directory).filter(n => n.endsWith(".md")).slice(0, 100).flatMap(name => {
-    try { const path = safeNote(directory, name), text = readFileSync(path, "utf8"); return [{ name, updated: statSync(path).mtimeMs, links: [...text.matchAll(/\[\[([^\]|#]+)(?:[^\]]*)\]\]/g)].map(m => m[1]) }]; } catch { return []; }
+  return readdirSync(/* turbopackIgnore: true */ directory).filter(n => n.endsWith(".md")).slice(0, 100).flatMap(name => {
+    try { const path = safeNote(directory, name), text = readFileSync(/* turbopackIgnore: true */ path, "utf8"); return [{ name, updated: statSync(path).mtimeMs, links: [...text.matchAll(/\[\[([^\]|#]+)(?:[^\]]*)\]\]/g)].map(m => m[1]) }]; } catch { return []; }
   }).sort((a, b) => b.updated - a.updated);
 }
 export function vaultNote(id: string, name: string) {
   const { directory } = workspaceFolder(id), path = safeNote(directory, name);
-  return { name, text: readFileSync(path, "utf8"), uri: "obsidian://open?path=" + encodeURIComponent(path) };
+  return { name, text: readFileSync(/* turbopackIgnore: true */ path, "utf8"), uri: "obsidian://open?path=" + encodeURIComponent(path) };
 }
 function generatedWrite(directory: string, name: string, text: string) {
   const path = join(directory, name), temp = path + ".tmp";

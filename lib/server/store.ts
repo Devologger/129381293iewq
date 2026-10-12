@@ -9,7 +9,7 @@ export type Bot = Context & { key: string; enabled: boolean; learning: boolean; 
 export type Workspace = { portfolio: Portfolio; bots: Bot[]; watchlist: string[]; lastWorkerAt: string | null; workerError: string | null };
 const state = globalThis as unknown as { obsidianDatabases?: Map<string, DatabaseSync> };
 
-export function dataDirectory() { return resolve(process.env.TERMINAL_DATA_DIR || ".runtime"); }
+export function dataDirectory() { return resolve(/* turbopackIgnore: true */ process.env.TERMINAL_DATA_DIR || ".runtime"); }
 export function keyMaterial() {
   mkdirSync(dataDirectory(), { recursive: true, mode: 0o700 });
   const file = join(dataDirectory(), "storage.key");
