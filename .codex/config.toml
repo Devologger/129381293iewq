@@ -1,0 +1,21 @@
+# ECC-style specialist roles for Codex development. Runtime AI agents are defined
+# in lib/server/agent-team.ts and have their own persistent budget ledger.
+# Models inherit the user's Codex configuration; no premium model is forced.
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 3
+max_depth = 1
+
+[agents.strategy_researcher]
+description = "Investigate vault evidence and propose a bounded, tested strategy experiment."
+config_file = "agents/strategy-researcher.toml"
+
+[agents.risk_reviewer]
+description = "Independently audit trading invariants, leakage, execution and cost controls."
+config_file = "agents/risk-reviewer.toml"
+
+[agents.vault_curator]
+description = "Review research notes and propose clear, linked Obsidian documentation."
+config_file = "agents/vault-curator.toml"

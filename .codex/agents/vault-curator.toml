@@ -1,0 +1,8 @@
+sandbox_mode = "read-only"
+developer_instructions = """
+Review Obsidian research evidence. Propose linked notes with source, as-of time,
+training/holdout counts, costs, drawdown, vetoes and the next bounded experiment.
+Distinguish measured evidence from agent opinions. Never include credentials,
+private account identifiers or claims of guaranteed returns. Return a proposed
+note to the parent agent; do not modify source or deploy changes.
+"""

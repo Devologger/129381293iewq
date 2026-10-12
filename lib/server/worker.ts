@@ -3,6 +3,8 @@ import { marketResponse } from "./market.ts";
 import { runResearch } from "./research.ts";
 import { saveVaultNote } from "./vault.ts";
 import { contextKey, readWorkspace, updateWorkspace, workspaceIds, type Context } from "./store.ts";
+import { runScheduledTeams } from "./agent-team.ts";
+import { runDemoCycle } from "./demo-bots.ts";
 
 export function validateContext(value: unknown): asserts value is Context {
   const c = value as Context;
@@ -54,4 +56,20 @@ export async function runPaperCycle() { if (worker.obsidianPaperBusy) return; wo
 export function startPaperWorker() {
   if (process.env.TERMINAL_WORKER_DISABLED === "1" || worker.obsidianPaperTimer) return;
   worker.obsidianPaperTimer = setInterval(() => { void runPaperCycle().catch(() => {}); }, 30000); worker.obsidianPaperTimer.unref();
+  const demoWorker = globalThis as unknown as { obsidianDemoTimer?: NodeJS.Timeout; obsidianDemoBusy?: boolean };
+  if (!demoWorker.obsidianDemoTimer) {
+    demoWorker.obsidianDemoTimer = setInterval(() => {
+      if (demoWorker.obsidianDemoBusy) return; demoWorker.obsidianDemoBusy = true;
+      void runDemoCycle().catch(() => {}).finally(() => { demoWorker.obsidianDemoBusy = false; });
+    }, 30000); demoWorker.obsidianDemoTimer.unref();
+  }
+  const teamWorker = globalThis as unknown as { obsidianTeamTimer?: NodeJS.Timeout; obsidianTeamBusy?: boolean };
+  if (!teamWorker.obsidianTeamTimer) {
+    teamWorker.obsidianTeamTimer = setInterval(() => {
+      if (teamWorker.obsidianTeamBusy) return;
+      teamWorker.obsidianTeamBusy = true;
+      void runScheduledTeams().catch(() => {}).finally(() => { teamWorker.obsidianTeamBusy = false; });
+    }, 60000);
+    teamWorker.obsidianTeamTimer.unref();
+  }
 }

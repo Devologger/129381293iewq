@@ -33,7 +33,14 @@ export function db() {
     CREATE TABLE IF NOT EXISTS credentials (name TEXT PRIMARY KEY, encrypted TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS links (hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS discord_accounts (user_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS discord_replays (id TEXT PRIMARY KEY, response TEXT NOT NULL, expires INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS discord_replays (id TEXT PRIMARY KEY, response TEXT NOT NULL, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS demo_orders (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, state TEXT NOT NULL, updated INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS demo_bots (symbol TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, state TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS demo_bot_locks (symbol TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS ai_calls (id TEXT PRIMARY KEY, day TEXT NOT NULL, workspace_id TEXT NOT NULL, run_id TEXT NOT NULL, role TEXT NOT NULL, model TEXT NOT NULL, reserved REAL NOT NULL, charged REAL NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cached_tokens INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS team_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, cache_key TEXT NOT NULL, state TEXT NOT NULL, created INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS team_settings (workspace_id TEXT PRIMARY KEY, state TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS team_locks (workspace_id TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
   state.obsidianDatabases.set(directory, connection);
   return connection;
 }

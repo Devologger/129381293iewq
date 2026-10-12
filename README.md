@@ -1,6 +1,6 @@
 # Obsidian Trading Workspace
 
-A standalone trading dashboard and paper automation service with multi-market charts, bounded Fibonacci learning, voice commands, an Obsidian research vault, optional OpenAI analysis, and signed Discord controls.
+A standalone trading dashboard and paper and Binance USD-M demo automation service with multi-market charts, bounded Fibonacci learning, a JARVIS-inspired voice console, an Obsidian research vault, a budgeted OpenAI research council, and signed Discord controls.
 
 `Devologger/312897ads` was a strategy and connection reference. This app does **not** need that checkout, its API, its database, its authentication, or port 8000. The canonical directional Fibonacci model is bundled under `research/`; provenance is in NOTICE.md.
 
@@ -23,8 +23,8 @@ Charts in sample mode, paper execution, strategy research, server persistence, a
 When ready, use private environment settings or an ignored `.env.local` file. `.env.example` lists optional variables. To use the app’s credential form, set `TERMINAL_ADMIN_PASSWORD` to a private password of at least 16 characters, restart, then unlock **Connections → Private integration settings**. Submitted values are encrypted with AES-256-GCM in the server ledger and are never returned by the API. Environment-managed bindings cannot be overwritten by that form.
 
 - **Discord:** `DISCORD_PUBLIC_KEY` is the application's Public Key from Discord Developer Portal → General Information. It is not the bot token. It verifies incoming slash commands; no bot token is required for this interaction endpoint.
-- **AI research:** `TRADE_AI_KEY` enables the optional OpenAI advisory endpoint. `TRADE_AI_MODEL` defaults to `gpt-5-mini`. Owner authentication is required, requests use `store: false`, and the model has no execution tools.
-- **Binance demo:** `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` enable signed, read-only USD-M demo account verification. These must be raw signing credentials, not proxy placeholders. They can be entered privately later. Verification uses `demo-fapi.binance.com`, reads balances, and places no orders. This app’s trading engine currently executes paper orders.
+- **AI research:** `TRADE_AI_KEY` enables the three-member research council. `TRADE_AI_MODEL` defaults to `gpt-5-mini`. Owner authentication is required, requests use `store: false`, and agents have no execution tools. All AI endpoints share a persistent budget.
+- **Binance demo:** `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` enable signed USD-M demo verification and exchange execution. These must be raw signing credentials, not proxy placeholders. They can be entered privately later. Verification reads balances without placing orders. The separate Binance demo desk supports market/limit orders, reduce-only closes, cancellation, reconciliation, and opt-in demo automation. All execution destinations are fixed to `demo-fapi.binance.com`; real-money execution is unavailable.
 - **Deployment:** set `TERMINAL_PUBLIC_ORIGIN` to the exact HTTPS origin behind a reverse proxy, so origin validation and secure cookies work. Do not expose credential configuration over remote HTTP.
 
 The `.runtime` directory holds the SQLite ledger and encryption/signing key. Preserve it across restarts; losing it loses workspace access and encrypted settings. It is excluded from Git, Docker build context, and application file tracing. The app can create a fresh workspace if its browser cookie is lost; it does not claim that different browsers automatically share an account.
@@ -53,7 +53,7 @@ The research harness is long-only, enters a reclaim at the next bar’s open, us
 
 Open `obsidian-vault` as an Obsidian vault. Manual and automated research save linked Markdown reports under `obsidian-vault/Research/<workspace-id>/`. The optional `TERMINAL_VAULT_DIR` changes the vault location. Notes include data source, costs, training/holdout results, and the paper journal. Markdown download remains available from the UI.
 
-Codex can read the notes and `Codex Research Protocol.md` to investigate and test further strategies or exchange adapters. Bounded runtime learning updates parameters; repository code changes use the Codex development workflow. The app does not autonomously deploy Codex patches. No Obsidian desktop process is required in the cloud container.
+Codex can read the notes and `Codex Research Protocol.md` to investigate and test further strategies or exchange adapters. Bounded runtime learning updates parameters; repository code changes use the Codex development workflow. The app does not autonomously deploy Codex patches. The research council produces reviewed notes on demand or on a persisted schedule; `.codex` contains ECC-style development roles. See [agent-team setup](docs/AGENT-TEAM.md). No Obsidian desktop process is required in the cloud container.
 
 ## Discord access
 
@@ -61,9 +61,35 @@ Configure the optional Public Key later. Deploy this app at a public HTTPS origi
 
 In dashboard Connections, generate a one-time link code. Use `/obsidian link code:<code>` privately within ten minutes. A code is single-use and binds the Discord user to that persistent workspace. Signed commands then read its actual paper status/positions and pause/resume its engine. Responses are ephemeral; unlinked users cannot read another workspace's portfolio. Only one Discord account is linked to a workspace at a time. No command has been registered or message sent by this setup.
 
-## Voice
+## Binance demo execution
 
-Use HTTPS and a browser supporting SpeechRecognition/WebKitSpeechRecognition, with microphone permission. Supported commands include `show Bitcoin`, `show markets`, `show strategy`, `show vault`, `run research`, `export report`, `start engine`, `pause engine`. The command field supports the same commands. The browser may use its speech provider; microphone recognition needs validation in your own browser. Paper orders use explicit dashboard buttons.
+1. Set a private `TERMINAL_ADMIN_PASSWORD` (16+ characters), restart, and unlock Connections.
+2. Add `BINANCE_DEMO_API_KEY` and `BINANCE_DEMO_API_SECRET` privately. These must be USD-M demo keys; spot testnet is a separate service.
+3. Set Binance demo to **one-way position mode**. The app rejects hedge mode and never changes that account setting for you.
+4. Open **Binance demo desk**, then refresh the account. Choose a USDT perpetual contract, side, market/limit type and notional.
+5. Preview the order. The server loads demo exchange filters, fresh mark price, account positions and pending orders; it enforces default caps of 500 USDT per entry and 2000 USDT total account exposure. A limit price must remain within 10% of mark.
+6. Check the explicit Binance demo confirmation and submit within 60 seconds. If the price/quantity changed, create a fresh preview. Orders use persistent client IDs. An uncertain write is reconciled by ID, never blindly retried; unresolved writes block new submissions.
+7. Confirmed/demo-uncertain order updates also write `Binance Demo Order Journal.md` into your private Obsidian workspace. Reduce-only close buttons and cancellation operate authoritative exchange positions/orders. Reconcile refreshes an order's actual status.
+8. To automate, choose size/timeframe, check the separate demo automation authorization and enable the demo bot. It establishes a closed-bar baseline, then trades long-only 0.618 reclaims using demo candles and local bounded research. No LLM call is needed for this trading loop.
+9. A contract has one workspace/bot owner. Existing positions must be closed before assigning a new bot. Pausing stops new entries but keeps position monitoring active. The server checks 2% stops and 4% targets every 30 seconds. These are sampled server checks, **not exchange-side protective orders**; the server and network must remain available.
+
+Use a dedicated demo account. The demo desk sees that entire exchange account; avoid manually trading a bot-managed contract elsewhere. Paper and demo balances are separate. Existing paper bots never change execution mode implicitly. Real credentials, actual account connectivity and demo fills still require your own private keys and permitted network access; automated tests use controlled exchange responses.
+
+## Research council and costs
+
+Run Strategy Lab research, then open **AI research team**. Select saved chart or Binance demo bot evidence, ask a question, and convene the strategy researcher, risk reviewer and vault curator. Each role calls OpenAI with a bounded evidence summary and earlier reviews. Full discussion and a linked note are saved to the Obsidian workspace.
+
+Defaults: $1/day, $0.20/run, 30 provider attempts/day, 1000 output tokens/call. SQLite persists usage/reservations across restarts and shares limits across workspaces. Identical completed briefings are cached for six hours. Unknown provider outcomes retain reservations; only an explicit rate-limit rejection allows one retry. Premium risk review requires configured model prices, an allow switch, and an explicit escalation request. Automatic schedules never escalate.
+
+Prices are conservative **configured accounting estimates**, not provider invoices. Verify rates for your selected model. Codex development-session charges are separate and cannot be metered by this app. [Full budget, schedule and ECC instructions](docs/AGENT-TEAM.md).
+
+## JARVIS-inspired voice interface
+
+Click **JARVIS voice** for the animated assistant console: rotating HUD rings, an audio-reactive core, waveform, transcript history and spoken replies through browser speech synthesis. Navigation/status work locally without AI tokens. Research questions invoke the budgeted council. Demo order submission is available only through desk confirmation.
+
+Use HTTPS and a browser supporting SpeechRecognition/WebKitSpeechRecognition. Allow microphone access and click **Start microphone**. Optional **Conversation** mode listens again after each spoken response; Stop microphone or closing the assistant ends capture. Toggle Spoken replies off for text-only replies. Speech recognition or selected speech voices may use the browser's speech provider; this is not an offline speech engine or OpenAI Realtime integration.
+
+Commands: `show Bitcoin`, `show markets`, `show strategy`, `show vault`, `show demo desk`, `show team`, `show connections`, `show status`, `show budget`, `run research`, `run team`, `export report`, `start engine`, `pause engine`. Natural research questions go to the council. Typed input supports the same actions. Browser microphone quality and availability need validation on your own device.
 
 ## Checks
 
@@ -74,6 +100,6 @@ npm run lint
 npm run build
 ```
 
-Tests exercise costs, collateral conservation, risk rejection, provider response schemas, source isolation, signed Discord access, persistent ledger transactions, encrypted settings, server learning/entry deduplication/protection, Binance demo signing, and chronological research. External exchange requests, real OpenAI responses, Discord registration, and microphone recognition need their optional runtime prerequisites. Binance demo verification is covered with controlled responses, not real keys.
+Tests exercise costs, collateral conservation, risk rejection, provider response schemas, source isolation, signed Discord access, persistent ledger transactions, encrypted settings, server learning/entry deduplication/protection, Binance demo orders/uncertainty/filter/exposure controls, bot bar deduplication and paused protection, agent budgets/cache/retries/usage, and chronological research. External exchange requests, real OpenAI responses, Discord registration, and microphone recognition need their optional runtime prerequisites. Binance demo verification and execution are covered with controlled responses, not real keys.
 
 The application build may emit a Turbopack tracing warning for the Python subprocess; the supported runtime layout keeps the bundled Python sources alongside the Node app. The build finishes by filtering private runtime, environment, and generated-note paths from all tracing manifests, including the instrumentation trace which Next's route exclusions do not cover. Keep persistent data as runtime storage; do not package `.runtime`, private notes, or `.env.local` as source artifacts.
