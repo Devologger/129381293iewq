@@ -1,3 +1,4 @@
+import {notify as notifyDiscord} from './alerts.ts';
 import { demoCandles, openPaper, closePaper, matchesFeed, type Feed, type Research } from "../terminal-engine.ts";
 import { marketResponse } from "./market.ts";
 import { runResearch } from "./research.ts";
@@ -49,6 +50,9 @@ export async function tickWorkspace(id: string, feedProvider = getFeed, research
       if (updatedWorkspace.bots.find(b => b.key === bot.key)?.lastBar === bar.time) saveVaultNote(id, f, report, updatedWorkspace.portfolio);
     } catch (error) { const message = error instanceof Error ? error.message : "Paper bot failed"; errors.push(message); updateWorkspace(id, ws => ({ ...ws, bots: ws.bots.map(b => b.key === bot.key ? { ...b, error: message } : b) })); }
   }
+  const finalState = readWorkspace(id);
+  for (const fill of finalState.portfolio.fills.filter(f=>f.pnl<0&&!initial.portfolio.fills.some(old=>old.id===f.id))) await notifyDiscord(id,"loss:"+fill.id,`Penguin paper risk alert: a paper position closed at a loss of $${Math.abs(fill.pnl).toFixed(2)} after recorded costs. Review the trading desk.`);
+  if(errors.length) await notifyDiscord(id,"worker:"+Math.floor(Date.now()/3600000),"Penguin execution monitor: a paper worker/feed failed. Check the dashboard. Existing protection depends on server/feed availability.");
   updateWorkspace(id, ws => ({ ...ws, lastWorkerAt: new Date().toISOString(), workerError: errors.length ? errors.join(" · ") : null }));
 }
 const worker = globalThis as unknown as { obsidianPaperTimer?: NodeJS.Timeout; obsidianPaperBusy?: boolean };

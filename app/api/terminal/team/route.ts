@@ -1,3 +1,4 @@
+import {saveAiRouting} from '@/lib/server/free-cloud';
 import { saveDailyCallLimit, diagnoseProvider, budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ export async function POST(request: Request) {
   try {
     const text = await request.text(); if (text.length > 5000) throw new Error("Payload too large");
     const data = JSON.parse(text), id = workspaceSession(request).id;
+    if (data.action === "routing") return Response.json({provider:saveAiRouting(data.provider),message:"Free router saved. Existing encrypted keys are reused; no paid fallback or accounting reset."});
     if (data.action === "budget") return Response.json({ budget: saveDailyCallLimit(data.dailyCalls), message: "Daily allowance saved. Existing usage and uncertain reservations are preserved." });
     if (data.action === "enable") {
       await diagnoseProvider();

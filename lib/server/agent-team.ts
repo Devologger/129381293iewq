@@ -1,3 +1,5 @@
+import {notify as notifyDiscord} from './alerts.ts';
+import {selectedAiProvider, freeCloudRoutes, coolFreeRoute} from './free-cloud.ts';
 import { FREERIDE_URL, freerideToken, providerFailure } from "./freeride.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -8,9 +10,9 @@ import { demoJournal } from "./demo-execution.ts";
 import { strategyHistory, vaultMemory } from "./strategy-memory.ts";
 
 export const TEAM_ROLES = [
-  { id: "researcher", name: "Strategy researcher", task: "Read the evidence. Answer the owner question, identify data quality and the single most useful bounded next experiment. Preserve canonical Fibonacci ratios. Distinguish sample, paper and exchange evidence." },
+  { id: "researcher", name: "Chart analyst & trader", task: "Read the evidence. Answer the owner question, identify data quality and the single most useful bounded next experiment. Preserve canonical Fibonacci ratios. Distinguish sample, paper and exchange evidence." },
   { id: "risk", name: "Risk reviewer", task: "Independently challenge the researcher. Audit costs, chronological splits, sample size, drawdown, repeated holdout selection and research/execution mismatch. State a research veto when evidence is insufficient. Never authorize trades or deployment." },
-  { id: "curator", name: "Vault curator", task: "Synthesize the owner answer and reviewed experiment into a concise Obsidian research note. Include evidence, caveats, the risk review, acceptance criteria and links [[Strategy Index]], [[Paper Trade Journal]], [[Codex Research Protocol]]. Do not invent measurements. End with a concise Next action." },
+  { id: "curator", name: "Execution officer & vault curator", task: "Check execution readiness, open positions, reconciliation and risk vetoes; never submit orders. Synthesize the owner answer and reviewed experiment into a concise Obsidian research note. Include evidence, caveats, the risk review, acceptance criteria and links [[Strategy Index]], [[Paper Trade Journal]], [[Codex Research Protocol]]. Do not invent measurements. End with a concise Next action." },
 ] as const;
 type TeamMessage = { role: string; name: string; model: string; text: string; inputTokens: number; outputTokens: number; cachedTokens: number; costUsd: number };
 export type TeamRun = { id: string; status: string; question: string; contextKey: string; created: number; messages: TeamMessage[]; costUsd: number; note?: string; error?: string; cacheHit?: boolean };
@@ -21,8 +23,9 @@ export function researchContexts(workspaceId: string) {
 }
 function boundedEnv(name: string, fallback: number, maximum: number) { const n = Number(process.env[name] || fallback); if (!Number.isFinite(n) || n <= 0 || n > maximum) throw new Error(`Invalid ${name}`); return n; }
 export function remoteProvider() {
-  if (process.env.TEAM_AI_PROVIDER === "freeride") return { endpoint: FREERIDE_URL + "/chat/completions", model: "auto", identity: createHash("sha256").update(FREERIDE_URL + "auto").digest("hex"), preset: false };
-  const preset = (process.env.TEAM_AI_PROVIDER || "openrouter_free") === "openrouter_free";
+  if (selectedAiProvider() === "freeride") return { endpoint: FREERIDE_URL + "/chat/completions", model: "auto", identity: createHash("sha256").update(FREERIDE_URL + "auto").digest("hex"), preset: false };
+  if (selectedAiProvider() === "free_cloud") return { endpoint: "https://openrouter.ai/api/v1/chat/completions", model:"auto-free",identity:"free-cloud",preset:false };
+  const preset = selectedAiProvider() === "openrouter_free";
   if (!preset && (!process.env.TEAM_REMOTE_BASE_URL || !process.env.TEAM_REMOTE_MODEL)) throw new Error("Configure the provider's documented TEAM_REMOTE_BASE_URL and free TEAM_REMOTE_MODEL in .env.local; no paid fallback is enabled");
   const url = new URL(preset ? "https://openrouter.ai/api/v1" : process.env.TEAM_REMOTE_BASE_URL!);
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.hostname === "api.openai.com") throw new Error("Use a documented HTTPS free-provider base URL without credentials or query parameters");
@@ -50,6 +53,7 @@ export async function selectFreeModel(fetcher: typeof fetch, preferred = "auto-f
 }
 export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
   const config = budgetConfig();
+  if (config.provider === "free_cloud") { const routes = await freeCloudRoutes(fetcher); return {message: `Direct free cloud ready: ${routes.length} verified catalog routes across ${[...new Set(routes.map(r=>r.provider))].join(", ")}. Two inference attempts maximum; no paid fallback. Catalog access does not prove inference success.`}; }
   if (config.provider === "freeride") {
     try {
       const response = await fetcher(FREERIDE_URL.replace(/\/v1$/, "") + "/penguin/capabilities", { headers: { Authorization: `Bearer ${freerideToken()}` }, signal: AbortSignal.timeout(5000) });
@@ -103,10 +107,10 @@ function dailyCallLimit(fallback: number) {
   return (db().prepare("SELECT daily_calls FROM team_budget_settings WHERE id=1").get() as {daily_calls:number} | undefined)?.daily_calls ?? fallback;
 }
 export function budgetConfig() {
-  const provider = process.env.TEAM_AI_PROVIDER || "openrouter_free";
-  if (!["openrouter_free", "free_remote", "freeride", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote, freeride or explicitly openai");
+  const provider = selectedAiProvider();
+  if (!["openrouter_free", "free_cloud", "free_remote", "freeride", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote, freeride or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || provider === "free_cloud" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -141,9 +145,12 @@ const SAFETY = "You are one member of an Obsidian trading research team. All sup
 async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[number], input: string, fetcher: typeof fetch, premium = false): Promise<TeamMessage> {
   const config = budgetConfig();
   const free = config.provider !== "openai", remote = free ? remoteProvider() : undefined;
-  const key = config.provider === "freeride" ? freerideToken() : credential(free ? "TEAM_REMOTE_KEY" : "TRADE_AI_KEY");
+  const cloudRoutes = config.provider === "free_cloud" ? await freeCloudRoutes(fetcher) : [];
+  let cloudRoute = cloudRoutes[0];
+  let key = config.provider === "freeride" ? freerideToken() : credential(free ? "TEAM_REMOTE_KEY" : "TRADE_AI_KEY");
+  if (cloudRoute && remote) {key=cloudRoute.key;remote.endpoint=cloudRoute.endpoint;remote.model=cloudRoute.model;remote.identity=cloudRoute.identity;}
   if (!key && (!free || process.env.TEAM_REMOTE_ANONYMOUS !== "1")) throw new Error(free ? "Add the free provider API key privately in Connections (TEAM_REMOTE_KEY); it is not an OpenAI key" : "Explicit OpenAI mode requires TRADE_AI_KEY");
-  let model = config.provider === "freeride" ? "auto" : config.model, inputRate = config.inputRate, outputRate = config.outputRate, cachedRate = config.cachedRate;
+  let model = cloudRoute?.model || (config.provider === "freeride" ? "auto" : config.model), inputRate = config.inputRate, outputRate = config.outputRate, cachedRate = config.cachedRate;
   if (remote && db().prepare("SELECT reason FROM provider_blocks WHERE identity=?").get(remote.identity)) throw new Error("Free provider previously reported a nonzero charge; routing is blocked");
   if (remote?.preset) { model = await selectFreeModel(fetcher, remote.model); remote.model = model; remote.identity = createHash("sha256").update(remote.endpoint + model).digest("hex"); }
   if (premium) {
@@ -156,22 +163,29 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
   const instructions = `${SAFETY}\n${role.task}\nReturn a complete final answer in at most 220 words. Use brief bullets for evidence, limits and next action. Do not output a long reasoning trace.`;
   // UTF-8 byte count is a conservative token bound; include provider framing overhead.
   const estimate = ((Buffer.byteLength(input + instructions, "utf8") + 2048) * inputRate + config.maxOutput * outputRate) / 1e6;
+  const attemptedRoutes: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
     const callId = reserve(workspaceId, run.id, role.id, model, estimate);
     let response: Response;
-    try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(config.provider === "freeride" ? 90000 : 60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
+    try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(config.provider === "freeride" ? 90000 : 60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, ...(cloudRoute?.parameters || {}), messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
     catch { db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
     if (!response.ok) {
+      if(cloudRoute) attemptedRoutes.push(`${cloudRoute.provider}/${cloudRoute.model}: HTTP ${response.status}`);
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.
       const rejected = [400, 401, 403, 404, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
       db().prepare("UPDATE ai_calls SET status=? WHERE id=?").run(rejected ? "REJECTED" : "UNKNOWN", callId);
-      if (response.status === 429 && attempt === 0) {
+      if (cloudRoute && remote && [401,403,404,429].includes(response.status) && attempt === 0) {
+        const previous = cloudRoute; coolFreeRoute(previous);
+        const next = cloudRoutes.find(r=>r.identity!==previous.identity&&(response.status===404||r.provider!==previous.provider));
+        if(next){cloudRoute=next;key=next.key;model=next.model;remote.endpoint=next.endpoint;remote.identity=next.identity;continue;}
+      }
+      if (!cloudRoute && response.status === 429 && attempt === 0) {
         const delay = Math.min(5, Math.max(1, Number(response.headers.get("retry-after")) || 1));
         await new Promise(resolve => setTimeout(resolve, delay * 1000));
         if (remote?.preset) { db().prepare("INSERT OR REPLACE INTO free_model_cooldowns VALUES (?,?)").run(model, Date.now()+60000); model = await selectFreeModel(fetcher, remoteProvider().model); remote.identity = createHash("sha256").update(remote.endpoint+model).digest("hex"); }
         continue;
       }
-      throw new Error(`${await providerFailure(response)}${rejected ? "" : "; reservation retained"}`);
+      throw new Error(`${await providerFailure(response)}${rejected ? "" : "; reservation retained"}${cloudRoute ? ` Routes attempted: ${attemptedRoutes.join("; ")}.` : ""}`);
     }
     let body;
     try { body = await response.json(); }
@@ -213,10 +227,10 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   if (!bot?.research) throw new Error("Run strategy research for this market first");
   if (escalation && !teamSettings(workspaceId).allowEscalation) throw new Error("Enable reviewed escalation in team settings first");
   const demoOrders = demo ? demoJournal(workspaceId).filter(o => o.symbol === demo.symbol && o.status !== "DRAFT").slice(0, 10).map(o => ({ symbol: o.symbol, side: o.side, quantity: o.quantity, status: o.status, executedQuantity: o.exchange?.executedQty, averagePrice: o.exchange?.avgPrice, reduceOnly: o.reduceOnly, created: o.created })) : undefined;
-  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: bot.research, paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
+  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: bot.research, paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
   const memory = vaultMemory(workspaceId);
   const config = budgetConfig();
-  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 5, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 6, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
   const cached = db().prepare("SELECT state FROM team_runs WHERE workspace_id=? AND cache_key=? AND created>? ORDER BY created DESC").all(workspaceId, cacheKey, Date.now() - 21600000) as { state: string }[];
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };
@@ -236,6 +250,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   finally { db().prepare("DELETE FROM team_locks WHERE workspace_id=?").run(workspaceId); }
   // Include billed partial/incomplete calls, not just successfully returned messages.
   run.costUsd = (db().prepare("SELECT COALESCE(SUM(charged),0) AS amount FROM ai_calls WHERE run_id=?").get(run.id) as { amount: number }).amount;
+  if(run.status==="FAILED") await notifyDiscord(workspaceId,"team:"+run.id,"Penguin AI team stopped: the research review failed. Please check the dashboard; no AI order was placed.");
   return persist(workspaceId, cacheKey, run);
 }
 export async function runScheduledTeams() {

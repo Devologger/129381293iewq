@@ -1,3 +1,4 @@
+import {notify as notifyDiscord} from './alerts.ts';
 import { db } from "./store.ts";
 import { demoAccount, demoClosedCandles, previewDemo, reconcileDemo, submitDemo } from "./demo-execution.ts";
 import { runResearch } from "./research.ts";
@@ -23,6 +24,7 @@ export async function configureDemoBot(workspaceId: string, value: { symbol: str
 export async function tickDemoBot(workspaceId: string, bot: DemoBot, fetcher: typeof fetch = fetch, researcher = runResearch) {
   const initial = demoBots(workspaceId).find(b => b.symbol === bot.symbol); if (!initial) return;
   let current: DemoBot = initial;
+  let alertContent: string | null = null; let alertFailure=false;
   const now = Date.now();
   const lease = db().prepare("INSERT INTO demo_bot_locks VALUES (?,?) ON CONFLICT(symbol) DO UPDATE SET expires=excluded.expires WHERE demo_bot_locks.expires < ?").run(bot.symbol, now + 300000, now);
   if (!lease.changes) return;
@@ -34,6 +36,7 @@ export async function tickDemoBot(workspaceId: string, bot: DemoBot, fetcher: ty
     }
     const position = account.positions.find(p => p.symbol === current.symbol);
     if (position) {
+      if(Number(position.unRealizedProfit)<0) alertContent=`Penguin Binance demo risk alert: ${current.symbol} has unrealized P&L of $${Number(position.unRealizedProfit).toFixed(2)} at the sampled exchange mark. This is demo, not real money.`;
       const entry = Number(position.entryPrice), mark = Number(position.markPrice), amount = Number(position.positionAmt);
       if (!Number.isFinite(entry) || entry <= 0) throw new Error("Invalid exchange entry price");
       const pnl = (mark / entry - 1) * (amount > 0 ? 1 : -1);
@@ -63,9 +66,11 @@ export async function tickDemoBot(workspaceId: string, bot: DemoBot, fetcher: ty
     // Preserve a concurrent owner's pause/configuration.
     if (latest) save(workspaceId, { ...current, enabled: latest.enabled, timeframe: latest.timeframe, notional: latest.notional, error: null, updatedAt: new Date().toISOString() });
   } catch (error) {
+    alertFailure=true; alertContent="Penguin Binance demo execution monitor stopped on an error. Check reconciliation and the dashboard; do not assume position protection is active.";
     const latest = demoBots(workspaceId).find(b => b.symbol === current!.symbol);
     if (latest) save(workspaceId, { ...latest, error: error instanceof Error ? error.message : "Demo bot failed", updatedAt: new Date().toISOString() });
   } finally { db().prepare("DELETE FROM demo_bot_locks WHERE symbol=?").run(bot.symbol); }
+  if(alertContent) await notifyDiscord(workspaceId,(alertFailure?"demo-failure:":"demo-loss:")+bot.symbol+":"+Math.floor(Date.now()/3600000),alertContent);
 }
 export async function runDemoCycle() {
   const rows = db().prepare("SELECT workspace_id, state FROM demo_bots").all() as { workspace_id: string; state: string }[];

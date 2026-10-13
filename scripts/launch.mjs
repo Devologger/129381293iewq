@@ -4,6 +4,7 @@ import {existsSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 nextEnv.loadEnvConfig(process.cwd());
 const {credential,dataDirectory}=await import('../lib/server/store.ts');
+const {selectedAiProvider}=await import('../lib/server/free-cloud.ts');
 const {freerideToken,FREERIDE_URL}=await import('../lib/server/freeride.ts');
 const children=[];
 let stopping=false;
@@ -25,7 +26,7 @@ function start(args){
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>stop());
 try{
   if(!existsSync('.next/BUILD_ID'))throw new Error('Build Penguin once with npm run build, then npm run launch.');
-  if(process.env.TEAM_AI_PROVIDER==='freeride'){
+  if(selectedAiProvider()==='freeride'){
     const eligible=credential('TEAM_REMOTE_KEY')||(credential('GROQ_API_KEY')&&process.env.FREERIDE_GROQ_FREE_CONFIRMED==='1');
     if(eligible){
       const url=FREERIDE_URL.replace(/\/v1$/,'')+'/penguin/capabilities';
