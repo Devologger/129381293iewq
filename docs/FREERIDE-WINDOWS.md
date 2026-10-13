@@ -129,3 +129,21 @@ Optional: `FREERIDE_OPENROUTER_MODEL` pins an exact OpenRouter model ID, but the
 Open **Cinematic JARVIS** from navigation, the phone's JARVIS dock button, or the voice console's **Cinematic view** link. The dedicated route is `/jarvis`; its Fullscreen button also hides browser chrome where supported. Animated orbit rings, stars and an audio-reactive core accompany real selected-market and paper-account status. Press **Start microphone** explicitly to listen. **Stop microphone** or closing the view releases the microphone. Voices are your browser's installed speech voices, with a British English preference; this is not the film actor's voice. Browser recognition may require an Internet connection and a secure browser context. OS reduced-motion settings disable ambient animation.
 
 On phones, the bottom dock exposes Home, Markets, JARVIS, Team and More; More opens all workspace views. POC research results remain available under Strategy explorer.
+
+## One-command startup and one-button council
+
+After pulling this update and running `npm.cmd run build`, use **one PowerShell window**:
+
+```powershell
+npm.cmd run launch
+```
+
+This starts the managed FreeRide gateway when enabled and eligible keys exist, waits for authenticated readiness, then starts Penguin. An already healthy authenticated gateway is reused. With no AI keys, paper/research starts and Connections explains how to add them privately. FreeRide installation is still a one-time prerequisite (`npm.cmd run freeride:install`). Ctrl+C stops only processes this launcher started. Do not run a second Penguin process on the same port. If an old separately started FreeRide process is running, stop it before launching to load new settings.
+
+In **Research council**, the allowance card now shows remaining calls, full three-agent runs available, and the reset time in your browser's timezone. Your error means the application's shared ledger reached its configured limit, even if the provider itself has quota remaining. Failed/incomplete provider requests still consume calls. The old default is nine calls/day (three successful council runs).
+
+To continue today, set **Daily call allowance** to a value you choose (for example 30) and click **Save daily allowance**. This owner-only setting persists across restarts and overrides `TEAM_DAILY_CALL_LIMIT`; it does not erase usage, clear uncertain reservations, change dollar budgets, buy credits or raise provider quotas. Thirty gateway calls can mean up to sixty upstream attempts. Alternatively wait until UTC midnight; the reset card displays your local time. A fresh council run requires at least three remaining calls before inference starts. Atomic per-call spending gates still apply.
+
+After strategy research exists for the selected market and Connections is unlocked, **Start council & auto reviews** checks the provider, runs all three agents, saves the briefing, then enables reviews every eight hours only when the first run completes successfully. Cached evidence and shared budgets continue to apply. Pause scheduled team stops future reviews. This button enables research, not exchange trading.
+
+In JARVIS, enable **Interface sounds** for locally generated startup/listening, completion and stop cues. Sounds use browser Web Audio, require a user gesture, and make no network request or AI call. Spoken replies still use your browser voices. `alexberardi/jarvis-admin` was inspected: it is an AGPL-licensed administration console requiring separate Jarvis services, not a bundled film voice or sound pack. Penguin's cues are independently generated; its code/assets were not imported.

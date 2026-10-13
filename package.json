@@ -12,7 +12,8 @@
     "test:research": "python3 -m unittest discover -s tests -p 'test_*.py'",
     "setup:windows": "node scripts/setup-windows.mjs",
     "freeride:install": "node scripts/freeride.mjs install",
-    "freeride:start": "node scripts/freeride.mjs start"
+    "freeride:start": "node scripts/freeride.mjs start",
+    "launch": "node scripts/launch.mjs"
   },
   "dependencies": {
     "lightweight-charts": "5.2.0",

@@ -80,11 +80,21 @@ function outputLimit(fallback = 2000) {
   if (!Number.isInteger(n) || n < 256 || n > 4000) throw new Error("TEAM_MAX_OUTPUT_TOKENS must be an integer from 256 to 4000");
   return n;
 }
+export function saveDailyCallLimit(value: number) {
+  if (!Number.isInteger(value) || value < 3 || value > 1000) throw new Error("Choose 3–1000 daily gateway calls");
+  db().exec("CREATE TABLE IF NOT EXISTS team_budget_settings (id INTEGER PRIMARY KEY CHECK(id=1), daily_calls INTEGER NOT NULL)");
+  db().prepare("INSERT INTO team_budget_settings VALUES (1,?) ON CONFLICT(id) DO UPDATE SET daily_calls=excluded.daily_calls").run(value);
+  return budgetStatus();
+}
+function dailyCallLimit(fallback: number) {
+  db().exec("CREATE TABLE IF NOT EXISTS team_budget_settings (id INTEGER PRIMARY KEY CHECK(id=1), daily_calls INTEGER NOT NULL)");
+  return (db().prepare("SELECT daily_calls FROM team_budget_settings WHERE id=1").get() as {daily_calls:number} | undefined)?.daily_calls ?? fallback;
+}
 export function budgetConfig() {
   const provider = process.env.TEAM_AI_PROVIDER || "openrouter_free";
   if (!["openrouter_free", "free_remote", "freeride", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote, freeride or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000)), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -99,7 +109,7 @@ export function saveTeamSettings(workspaceId: string, value: Partial<TeamSetting
 export function teamRuns(workspaceId: string): TeamRun[] { return (db().prepare("SELECT state FROM team_runs WHERE workspace_id=? ORDER BY created DESC LIMIT 12").all(workspaceId) as { state: string }[]).map(r => JSON.parse(r.state)); }
 export function budgetStatus() {
   const rows = db().prepare("SELECT reserved, charged, input_tokens, output_tokens, cached_tokens, status FROM ai_calls WHERE day=?").all(utcDay()) as { reserved: number; charged: number; input_tokens: number; output_tokens: number; cached_tokens: number; status: string }[];
-  return { ...budgetConfig(), day: utcDay(), usedUsd: rows.reduce((s, r) => s + r.charged, 0), reservedUsd: rows.reduce((s, r) => s + (["RESERVED", "UNKNOWN"].includes(r.status) ? r.reserved : 0), 0), calls: rows.length, inputTokens: rows.reduce((s, r) => s + r.input_tokens, 0), outputTokens: rows.reduce((s, r) => s + r.output_tokens, 0), cachedTokens: rows.reduce((s, r) => s + r.cached_tokens, 0), unknownCalls: rows.filter(r => r.status === "UNKNOWN" || r.status === "RESERVED").length };
+  return { ...budgetConfig(), day: utcDay(), resetsAt: new Date(Date.parse(utcDay() + "T00:00:00Z") + 86400000).toISOString(), remainingCalls: Math.max(0, budgetConfig().dailyCalls - rows.length), usedUsd: rows.reduce((s, r) => s + r.charged, 0), reservedUsd: rows.reduce((s, r) => s + (["RESERVED", "UNKNOWN"].includes(r.status) ? r.reserved : 0), 0), calls: rows.length, inputTokens: rows.reduce((s, r) => s + r.input_tokens, 0), outputTokens: rows.reduce((s, r) => s + r.output_tokens, 0), cachedTokens: rows.reduce((s, r) => s + r.cached_tokens, 0), unknownCalls: rows.filter(r => r.status === "UNKNOWN" || r.status === "RESERVED").length };
 }
 function persist(workspaceId: string, cacheKey: string, run: TeamRun) { db().prepare("INSERT INTO team_runs VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state=excluded.state").run(run.id, workspaceId, cacheKey, JSON.stringify(run), run.created); return run; }
 function takeLease(workspaceId: string) { const now = Date.now(); const result = db().prepare("INSERT INTO team_locks VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET expires=excluded.expires WHERE team_locks.expires < ?").run(workspaceId, now + 600000, now); if (!result.changes) throw new Error("A research team run is already in progress"); }
@@ -108,7 +118,9 @@ function reserve(workspaceId: string, runId: string, role: string, model: string
   try {
     const budget = budgetStatus();
     const total = connection.prepare("SELECT COALESCE(SUM(charged + CASE WHEN status IN ('RESERVED','UNKNOWN') THEN reserved ELSE 0 END), 0) AS amount FROM ai_calls WHERE run_id=?").get(runId) as { amount: number };
-    if (budget.usedUsd + budget.reservedUsd + amount > budget.dailyUsd || budget.calls >= budget.dailyCalls || total.amount + amount > budget.runUsd) throw new Error("Research team spending/call limit reached; no provider request was made");
+    if (budget.usedUsd + budget.reservedUsd + amount > budget.dailyUsd) throw new Error(`Daily spending limit reached, including uncertain reservations. Resets ${budget.resetsAt}; no provider request was made`);
+    if (total.amount + amount > budget.runUsd) throw new Error("Per-run spending limit reached; no provider request was made");
+    if (budget.calls >= budget.dailyCalls) throw new Error(`Daily call limit reached (${budget.calls}/${budget.dailyCalls}). Resets ${budget.resetsAt}. Adjust Daily call allowance or wait; no provider request was made`);
     const id = randomUUID(); connection.prepare("INSERT INTO ai_calls (id,day,workspace_id,run_id,role,model,reserved,charged,status) VALUES (?,?,?,?,?,?,?,0,'RESERVED')").run(id, utcDay(), workspaceId, runId, role, model, amount);
     connection.exec("COMMIT"); return id;
   } catch (error) { connection.exec("ROLLBACK"); throw error; }
@@ -200,6 +212,8 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   const run: TeamRun = { id: randomUUID(), status: "RUNNING", contextKey, question, created: Date.now(), messages: [], costUsd: 0 };
   persist(workspaceId, cacheKey, run);
   try {
+  const allowance = budgetStatus();
+  if (allowance.remainingCalls < TEAM_ROLES.length) throw new Error(`Council needs 3 calls; ${allowance.remainingCalls} remain (${allowance.calls}/${allowance.dailyCalls} used). Resets ${allowance.resetsAt}. Increase Daily call allowance or wait; no provider request was made.`);
     for (const role of TEAM_ROLES) {
       const input = JSON.stringify({ ownerQuestion: question, evidence, obsidianMemory: memory, teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 5000) })) });
       const message = await ask(workspaceId, run, role, input, fetcher, escalation && role.id === "risk");
