@@ -30,13 +30,13 @@ class GatewayTests(unittest.TestCase):
             self.assertFalse(gateway.zero_price(m(prices)))
         self.assertFalse(gateway.zero_price(m({'prompt':'0','completion':'0'}, 'paid/model')))
 
-    def test_reasoning_models_are_excluded_unless_explicitly_enabled(self):
+    def test_known_reasoning_exclusion_and_optional_reasoning_eligibility(self):
         plain=Model('llama/chat:free','openrouter',32768)
         apodex=Model('apodex/apodex-1.1-mini:free','openrouter',32768)
         advertised=Model('ordinary-name:free','openrouter',32768,supported_parameters=('reasoning',))
         self.assertTrue(gateway.research_model(plain))
         self.assertFalse(gateway.research_model(apodex))
-        self.assertFalse(gateway.research_model(advertised))
+        self.assertTrue(gateway.research_model(advertised))
         with patch.dict(os.environ, {'PENGUIN_ALLOW_REASONING':'1'}):
             self.assertTrue(gateway.research_model(advertised))
             self.assertTrue(gateway.research_model(apodex))
@@ -49,12 +49,13 @@ class GatewayTests(unittest.TestCase):
         def upstream(request):
             if request.url.path.endswith('/models'):
                 return httpx.Response(200, json={'data': [
-                    {'id':'test:free','context_length':32768,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}},
+                    {'id':'test:free','supported_parameters':['reasoning'],'context_length':32768,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}},
                     {'id':'apodex/apodex-1.1-mini:free','context_length':999999,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'},'supported_parameters':['reasoning']},
                     {'id':'priced:free','context_length':999999,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'1'}}]})
             if request.url.path.endswith('/chat/completions'):
                 body = json.loads(request.content); calls.append(body)
                 self.assertEqual(body['model'], 'test:free')
+                self.assertEqual(body['reasoning'], {'enabled':False})
                 self.assertEqual(body['max_tokens'],2000)
                 if mode[0] == 'privacy':
                     return httpx.Response(403, json={'error':{'message':'No endpoints match data policy synthetic-private-secret'}})
@@ -130,6 +131,30 @@ class GatewayTests(unittest.TestCase):
             provider, answer = asyncio.run(run())
             self.assertIsNone(provider)
             self.assertEqual(calls,['openrouter.ai'])
+
+    def test_readiness_distinguishes_cooldown_empty_catalog_and_rejected_key(self):
+        h = {'Authorization': 'Bearer ' + 'a' * 64}
+        request = {'model':'auto','stream':False,'max_tokens':2000,'messages':[{'role':'user','content':'Synthetic'}]}
+        with patch.object(gateway.KeyCooldown, 'cooldown_remaining', return_value=45), patch.object(gateway.StrictOpenRouter, 'list_free_models') as catalog:
+            with TestClient(gateway.build_app()) as client:
+                status = client.get('/penguin/readiness', headers=h).json()
+                self.assertFalse(status['ready'])
+                self.assertEqual(status['providers'][0]['status'], 'cooldown')
+                self.assertEqual(status['providers'][0]['retryAfterSeconds'], 45)
+                self.assertEqual(client.post('/v1/chat/completions', headers=h, json=request).status_code, 409)
+                catalog.assert_not_called()
+        with patch.object(gateway.KeyCooldown, 'cooldown_remaining', return_value=None), patch.object(gateway.StrictOpenRouter, 'list_free_models', return_value=[]):
+            with TestClient(gateway.build_app()) as client:
+                self.assertEqual(client.get('/penguin/readiness', headers=h).json()['providers'][0]['status'], 'no_eligible_models')
+                response = client.post('/v1/chat/completions', headers=h, json=request)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json()['error']['type'], 'gateway_not_ready')
+        error = httpx.HTTPStatusError('synthetic-private-secret', request=httpx.Request('GET','https://openrouter.ai/api/v1/models'), response=httpx.Response(403))
+        with patch.object(gateway.KeyCooldown, 'cooldown_remaining', return_value=None), patch.object(gateway.StrictOpenRouter, 'list_free_models', side_effect=error):
+            with TestClient(gateway.build_app()) as client:
+                response = client.get('/penguin/readiness', headers=h)
+                self.assertEqual(response.json()['providers'][0]['status'], 'key_rejected')
+                self.assertNotIn('synthetic-private-secret', response.text)
 
     def test_bounded_attempts(self):
         import asyncio

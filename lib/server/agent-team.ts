@@ -58,6 +58,18 @@ export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
       if (info.gateway !== "penguin-freeride" || info.localModels !== false || info.paidFallback !== false || info.maxUpstreamAttempts !== 2) throw new Error("Gateway safety configuration mismatch");
       const providers = Array.isArray(info.providers) ? info.providers.filter((p: unknown) => p === "openrouter" || p === "groq") : [];
       const hints: string[] = [];
+      if (info.readinessVersion === 1) {
+        const check = await fetcher(FREERIDE_URL.replace(/\/v1$/, "") + "/penguin/readiness", { headers: { Authorization: `Bearer ${freerideToken()}` }, signal: AbortSignal.timeout(45000) });
+        if (!check.ok) throw new Error("Gateway readiness check failed; restart FreeRide");
+        const readiness = await check.json();
+        for (const row of readiness.providers || []) {
+          const provider = row.provider === "groq" ? "Groq" : row.provider === "openrouter" ? "OpenRouter" : "Provider";
+          const statuses: Record<string,string> = {ready: `${Number(row.eligibleModels) || 0} eligible free models`,cooldown: `key cooling down; retry in ${Math.max(0, Number(row.retryAfterSeconds) || 0)} seconds`,key_rejected: "catalog access rejected; check key/account/privacy restrictions",no_eligible_models: "no models pass the free/context filters; check any model pin",catalog_rate_limited: "catalog rate limited; wait for provider reset",catalog_unavailable: "catalog unavailable; check gateway network access"};
+          hints.push(`${provider}: ${statuses[row.status] || "unavailable"}.`);
+        }
+        if (!readiness.ready) throw new Error(`FreeRide is reachable but not ready. ${hints.join(" ")} No inference request made.`);
+      }
+
       if (!providers.includes("groq")) {
         if (!credential("GROQ_API_KEY")) hints.push("Groq key is missing in Penguin: save it under Connections > Groq free-tier key, not the OpenRouter key field.");
         else if (process.env.FREERIDE_GROQ_FREE_CONFIRMED !== "1") hints.push("Groq key is saved, but free-plan confirmation is off. After confirming your Groq free plan, set FREERIDE_GROQ_FREE_CONFIRMED=1 in .env.local and restart both services.");
@@ -151,7 +163,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     catch { db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
     if (!response.ok) {
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.
-      const rejected = [400, 401, 403, 404, 429].includes(response.status);
+      const rejected = [400, 401, 403, 404, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
       db().prepare("UPDATE ai_calls SET status=? WHERE id=?").run(rejected ? "REJECTED" : "UNKNOWN", callId);
       if (response.status === 429 && attempt === 0) {
         const delay = Math.min(5, Math.max(1, Number(response.headers.get("retry-after")) || 1));

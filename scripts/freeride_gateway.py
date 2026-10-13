@@ -2,6 +2,8 @@
 
 Remote inference only. No upstream CLI plugins, global config or local models.
 """
+import asyncio
+import time
 import contextvars
 import hmac
 import math
@@ -36,8 +38,6 @@ def research_model(model):
     """Prefer ordinary chat: reasoning can consume the entire free output allowance."""
     if os.environ.get('PENGUIN_ALLOW_REASONING') == '1':
         return True
-    if set(model.supported_parameters) & {'reasoning', 'reasoning_effort', 'include_reasoning'}:
-        return False
     return not re.search(r'apodex|gpt-oss|qwq|qwen3|reasoner|thinking|nemotron|deepseek.*r1|(?:^|[/_-])r1(?:$|[/_-])', model.api_id, re.I)
 
 
@@ -54,6 +54,8 @@ class BoundedProvider:
             selected = next((m for m in models if m.context_length >= 16384 and 'text' in m.output_modalities), None)
         if selected is None:
             raise RuntimeError('No eligible free model')
+        if self.name == 'openrouter' and os.environ.get('PENGUIN_ALLOW_REASONING') != '1' and 'reasoning' in selected.supported_parameters:
+            request = request.model_copy(update={'reasoning': {'enabled': False}})
         count['calls'] += 1
         count.pop('failure', None)
         try:
@@ -121,17 +123,46 @@ def build_app():
     smart_routing._CACHE_PATH = state / 'leaderboard.json'
     providers = []
     if os.environ.get('OPENROUTER_API_KEY'):
-        providers.append(StrictOpenRouter())
+        providers.append(StrictOpenRouter(http_timeout=10))
     if os.environ.get('GROQ_API_KEY') and os.environ.get('PENGUIN_GROQ_FREE_CONFIRMED') == '1':
-        providers.append(FreeGroq())
+        providers.append(FreeGroq(http_timeout=10))
     app = create_app(providers=providers, verbose=False)
+    readiness_cache = {}
+    async def readiness():
+        rows = []
+        cooldown = KeyCooldown.shared()
+        for provider in providers:
+            key = os.environ.get('OPENROUTER_API_KEY' if provider.name == 'openrouter' else 'GROQ_API_KEY', '')
+            remaining = cooldown.cooldown_remaining(provider.name, key) or 0
+            row = {'provider': provider.name, 'eligibleModels': 0, 'retryAfterSeconds': math.ceil(remaining)}
+            if remaining > 0:
+                row['status'] = 'cooldown'
+            else:
+                cached = readiness_cache.get(provider.name)
+                if cached and time.monotonic() - cached[0] < 60:
+                    row.update(cached[1])
+                else:
+                    try:
+                        models = await asyncio.to_thread(provider.list_free_models, key)
+                        row.update(status='ready' if models else 'no_eligible_models', eligibleModels=len(models))
+                    except httpx.HTTPStatusError as error:
+                        status = error.response.status_code
+                        row['status'] = 'key_rejected' if status in (401,403) else 'catalog_rate_limited' if status == 429 else 'catalog_unavailable'
+                    except Exception:
+                        row['status'] = 'catalog_unavailable'
+                    readiness_cache[provider.name] = (time.monotonic(), dict(row))
+            rows.append(row)
+        return {'ready': any(r['status'] == 'ready' for r in rows), 'providers': rows, 'inferenceRequests': 0}
+
 
     @app.middleware('http')
     async def guard(request: Request, call_next):
         if not hmac.compare_digest(request.headers.get('authorization', ''), 'Bearer ' + token):
             return JSONResponse({'error': {'message': 'Private gateway authentication required'}}, status_code=401)
         if request.url.path == '/penguin/capabilities' and request.method == 'GET':
-            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2, 'maxOutputTokens': 4000, 'routingPolicy': 'reasoning-opt-in' if os.environ.get('PENGUIN_ALLOW_REASONING') == '1' else 'concise-chat', 'openrouterModel': os.environ.get('PENGUIN_OPENROUTER_MODEL', '')})
+            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2, 'maxOutputTokens': 4000, 'routingPolicy': 'reasoning-opt-in' if os.environ.get('PENGUIN_ALLOW_REASONING') == '1' else 'concise-chat', 'readinessVersion': 1, 'openrouterModel': os.environ.get('PENGUIN_OPENROUTER_MODEL', '')})
+        if request.method == 'GET' and request.url.path == '/penguin/readiness':
+            return JSONResponse(await readiness())
         if request.method == 'GET' and request.url.path in ('/health', '/v1/models'):
             return await call_next(request)
         if request.method != 'POST' or request.url.path != '/v1/chat/completions':
@@ -146,10 +177,17 @@ def build_app():
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
             return JSONResponse({'error': {'message': 'Use auto, non-streaming and max_tokens <= 4000'}}, status_code=400)
+        status = await readiness()
+        if not status['ready']:
+            return JSONResponse({'error': {'type': 'gateway_not_ready', 'message': 'No eligible provider is ready; no inference request was made.'}, 'readiness': status}, status_code=409)
         counter = {'calls': 0}
         handle = attempts.set(counter)
         try:
             response = await call_next(request)
+            if response.status_code >= 400 and counter['calls'] == 0:
+                from freeride.server.routes.models import invalidate_catalog
+                invalidate_catalog()
+                return JSONResponse({'error': {'type': 'gateway_not_ready', 'message': 'FreeRide could not resolve an eligible model; no inference request was made.'}}, status_code=409)
             if response.status_code >= 400 and counter.get('failure'):
                 return JSONResponse({'error': {'type': counter['failure'], 'message': 'Provider explicitly denied access.'}}, status_code=403)
             return response

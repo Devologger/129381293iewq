@@ -84,3 +84,13 @@ test('Groq diagnostics distinguish missing key, confirmation, stale gateway and 
  info.maxOutputTokens=1000;assert.match((await diagnoseProvider(fetcher)).message,/older output cap/);
  } finally {delete process.env.TEAM_AI_PROVIDER;delete process.env.FREERIDE_GROQ_FREE_CONFIRMED;}
 });
+
+test('readiness diagnostics distinguish model availability and cooldown without inference',async()=>{
+ process.env.TEAM_AI_PROVIDER='freeride';
+ try {let ready=false;let gets=0;const fetcher=async(url,options)=>{assert.equal(options.method,undefined);gets++;return Response.json(url.endsWith('/capabilities')?{gateway:'penguin-freeride',providers:['openrouter','groq'],localModels:false,paidFallback:false,maxUpstreamAttempts:2,maxOutputTokens:4000,readinessVersion:1}:{ready,providers:[{provider:'openrouter',status:'cooldown',retryAfterSeconds:45},{provider:'groq',status:ready?'ready':'no_eligible_models',eligibleModels:ready?2:0}]});};await assert.rejects(diagnoseProvider(fetcher),/retry in 45 seconds/);ready=true;assert.match((await diagnoseProvider(fetcher)).message,/Groq: 2 eligible free models/);assert.equal(gets,4);
+ }finally{delete process.env.TEAM_AI_PROVIDER;}
+});
+test('explicit private gateway no-inference rejection preserves count without uncertain reservation',async()=>{
+ process.env.TEAM_AI_PROVIDER='freeride';process.env.TEAM_DAILY_CALL_LIMIT='100';
+ try{const before=budgetStatus();const run=await runTeam(workspace(),context,'No provider ready fixture',false,async()=>Response.json({error:{type:'gateway_not_ready'}},{status:409}));assert.equal(run.status,'FAILED');assert.match(run.error,/no eligible provider/);assert.doesNotMatch(run.error,/reservation retained/);const after=budgetStatus();assert.equal(after.calls,before.calls+1);assert.equal(after.unknownCalls,before.unknownCalls);}finally{delete process.env.TEAM_AI_PROVIDER;delete process.env.TEAM_DAILY_CALL_LIMIT;}
+});

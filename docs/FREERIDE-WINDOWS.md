@@ -103,7 +103,7 @@ If the new error explicitly reports output-limit exhaustion, you can increase `T
 
 ## Updating after an output-limit failure
 
-If Apodex used 1,911 reasoning tokens out of a 2,000-token cap, almost no room remained for the visible answer. The managed gateway now defaults to concise chat routing: it excludes models advertising reasoning controls and known reasoning model families. This is a selection heuristic, not a guarantee about every provider model. If no eligible free model is available, the run stops or uses the eligible Groq fallback within the existing two-attempt limit; it never switches to paid inference.
+If Apodex used 1,911 reasoning tokens out of a 2,000-token cap, almost no room remained for the visible answer. The managed gateway now defaults to concise chat routing: it excludes known reasoning-heavy model families. Models offering optional reasoning remain eligible with reasoning disabled. This is a selection heuristic, not a guarantee about every provider model. If no eligible free model is available, the run stops or uses the eligible Groq fallback within the existing two-attempt limit; it never switches to paid inference.
 
 Stop both PowerShell processes with Ctrl+C. In your Penguin repository folder:
 
@@ -147,3 +147,17 @@ To continue today, set **Daily call allowance** to a value you choose (for examp
 After strategy research exists for the selected market and Connections is unlocked, **Start council & auto reviews** checks the provider, runs all three agents, saves the briefing, then enables reviews every eight hours only when the first run completes successfully. Cached evidence and shared budgets continue to apply. Pause scheduled team stops future reviews. This button enables research, not exchange trading.
 
 In JARVIS, enable **Interface sounds** for locally generated startup/listening, completion and stop cues. Sounds use browser Web Audio, require a user gesture, and make no network request or AI call. Spoken replies still use your browser voices. `alexberardi/jarvis-admin` was inspected: it is an AGPL-licensed administration console requiring separate Jarvis services, not a bundled film voice or sound pack. Penguin's cues are independently generated; its code/assets were not imported.
+
+## Reachable but no usable model/key
+
+Update Penguin, stop both old processes, rebuild and use `npm.cmd run launch`. The revised **Check AI connection** checks provider catalogs as well as gateway reachability, without inference. It reports each provider separately:
+
+- **Eligible free models:** catalog checks passed; this still does not prove an inference request will succeed.
+- **Key cooling down:** wait for the reported seconds. Cooldowns persist across restarts; they are not erased to bypass quotas.
+- **Catalog access rejected:** check that provider's key/account permissions and privacy restrictions privately.
+- **No eligible models:** remove an unavailable `FREERIDE_OPENROUTER_MODEL` pin, or use another eligible configured provider.
+- **Catalog unavailable/rate limited:** check gateway network access or wait for the provider quota reset.
+
+The earlier filter incorrectly excluded every model advertising optional reasoning. Those models now remain eligible, with OpenRouter `reasoning.enabled=false`; known reasoning-heavy families remain excluded by default. Explicit no-inference gateway failures are rejected locally, rather than marked as uncertain inference. Previous unknown ledger entries remain preserved. FreeRide failure messages cannot establish which account restriction exists without this readiness check.
+
+The council dashboard now uses separate allowance/reset/schedule cards, full-width mobile inputs, a primary start button, and collapsible advanced controls/history. Daily allowance inputs initially load the saved value; premium controls appear only in explicit paid mode. Expand **Allowance, schedule & advanced controls** for one-off runs and limits.
