@@ -15,7 +15,7 @@ export const TEAM_ROLES = [
   { id: "curator", name: "Execution officer & vault curator", task: "Check execution readiness, open positions, reconciliation and risk vetoes; never submit orders. Synthesize the owner answer and reviewed experiment into a concise Obsidian research note. Include evidence, caveats, the risk review, acceptance criteria and links [[Strategy Index]], [[Paper Trade Journal]], [[Codex Research Protocol]]. Do not invent measurements. End with a concise Next action." },
 ] as const;
 type TeamMessage = { role: string; name: string; model: string; text: string; inputTokens: number; outputTokens: number; cachedTokens: number; costUsd: number };
-export type TeamRun = { id: string; status: string; question: string; contextKey: string; created: number; messages: TeamMessage[]; costUsd: number; note?: string; error?: string; cacheHit?: boolean };
+export type TeamRun = { id: string; status: string; question: string; contextKey: string; created: number; messages: TeamMessage[]; costUsd: number; note?: string; error?: string; cacheHit?: boolean; provider?: string };
 export type TeamSettings = { enabled: boolean; intervalMinutes: number; contextKey: string; nextAt: number; allowEscalation: boolean };
 const DEFAULT_SETTINGS: TeamSettings = { enabled: false, intervalMinutes: 240, contextKey: "", nextAt: 0, allowEscalation: false };
 export function researchContexts(workspaceId: string) {
@@ -168,9 +168,10 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     const callId = reserve(workspaceId, run.id, role.id, model, estimate);
     let response: Response;
     try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(config.provider === "freeride" ? 90000 : 60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, ...(cloudRoute?.parameters || {}), messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
-    catch { db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
+    catch { if(cloudRoute) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60); db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
     if (!response.ok) {
       if(cloudRoute) attemptedRoutes.push(`${cloudRoute.provider}/${cloudRoute.model}: HTTP ${response.status}`);
+      if(cloudRoute&&response.status>=500) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60);
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.
       const rejected = [400, 401, 403, 404, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
       db().prepare("UPDATE ai_calls SET status=? WHERE id=?").run(rejected ? "REJECTED" : "UNKNOWN", callId);
@@ -185,11 +186,11 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
         if (remote?.preset) { db().prepare("INSERT OR REPLACE INTO free_model_cooldowns VALUES (?,?)").run(model, Date.now()+60000); model = await selectFreeModel(fetcher, remoteProvider().model); remote.identity = createHash("sha256").update(remote.endpoint+model).digest("hex"); }
         continue;
       }
-      throw new Error(`${await providerFailure(response)}${rejected ? "" : "; reservation retained"}${cloudRoute ? ` Routes attempted: ${attemptedRoutes.join("; ")}.` : ""}`);
+      throw new Error(`${config.provider}: ${await providerFailure(response)}${rejected ? "" : "; reservation retained"}${cloudRoute ? ` Routes attempted: ${attemptedRoutes.join("; ")}.` : ""}`);
     }
     let body;
     try { body = await response.json(); }
-    catch { db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider returned unreadable usage; reservation retained"); }
+    catch { if(cloudRoute) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60); db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider returned unreadable usage; reservation retained"); }
     if (remote && [body.usage?.cost, body.cost, body.billing?.cost].some(v => v !== undefined && v !== null && Number.isFinite(Number(v)) && Number(v) > 0)) {
       db().prepare("INSERT OR REPLACE INTO provider_blocks VALUES (?,?)").run(remote.identity, "Provider reported nonzero billing despite free-tier declaration");
       const reported = Math.max(...[body.usage?.cost, body.cost, body.billing?.cost].map(v=>Number(v)).filter(Number.isFinite));
@@ -235,7 +236,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };
   takeLease(workspaceId);
-  const run: TeamRun = { id: randomUUID(), status: "RUNNING", contextKey, question, created: Date.now(), messages: [], costUsd: 0 };
+  const run: TeamRun = { id: randomUUID(), status: "RUNNING", contextKey, question, created: Date.now(), messages: [], costUsd: 0, provider: budgetConfig().provider };
   persist(workspaceId, cacheKey, run);
   try {
   const allowance = budgetStatus();

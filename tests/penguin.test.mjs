@@ -8,6 +8,7 @@ import {db,createWorkspace,updateWorkspace,saveCredential} from '../lib/server/s
 import {runTeam,diagnoseProvider,budgetStatus,budgetConfig} from '../lib/server/agent-team.ts';
 import {FREERIDE_URL,freerideToken,providerFailure} from '../lib/server/freeride.ts';
 import {vaultNotes,vaultNote,saveAgentMemory,generateVaultViews} from '../lib/server/vault.ts';
+process.env.TEAM_KEEP_LEGACY_GATEWAY='1';
 const folder=mkdtempSync(join(tmpdir(),'penguin-check-'));
 process.env.TERMINAL_DATA_DIR=folder;process.env.TERMINAL_VAULT_DIR=join(folder,'vault');
 after(()=>{db().close();rmSync(folder,{recursive:true,force:true});});

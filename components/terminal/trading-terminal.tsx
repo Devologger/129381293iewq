@@ -305,7 +305,7 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
 
   if (view === "jarvis") return <div className="ot-root penguin-hud penguin-cinematic-shell"><JarvisAssistant open fullscreen onClose={exitCinematic} onCommand={assistantCommand} telemetry={{ market: `${symbol} · ${exchange.toUpperCase()} · ${timeframe}`, source: source === "demo" ? "SYNTHETIC SAMPLE" : feedError ? "FEED UNAVAILABLE" : "EXCHANGE CLOSED BARS", price: last ? price(last.close) : "—", paper: loaded ? `${usd(portfolio.cash)} · ${portfolio.paused ? "PAUSED" : "RUNNING"}` : "LOADING", positions: portfolio.positions.length }} /></div>;
   return <div className="ot-root penguin-hud penguin-compact"><div className="penguin-hud-grid" aria-hidden="true" /><div className="penguin-hud-orbit" aria-hidden="true" />
-    <aside className="ot-sidebar">
+    <aside className="ot-sidebar" tabIndex={0} aria-label="Workspace sidebar">
       <Link href="/terminal" className="ot-brand"><div className="ot-brand-mark">◈</div><div>PENGUIN<small>INTELLIGENT TRADING</small></div></Link>
       <div className="ot-workspace"><span className="ot-workspace-avatar">P</span><div>Personal workspace<small>Research & execution</small></div><Icon name="down" size={14} /></div>
       <p className="ot-nav-label">WORKSPACE</p>

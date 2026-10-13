@@ -26,5 +26,6 @@ export async function providerFailure(response: Response) {
   if (/gateway_not_ready/.test(evidence)) return "FreeRide is reachable but no eligible provider is ready. Click Check AI connection for model counts, key access or cooldown details. No inference request was made.";
   if (/no_usable_keys|no_model_available/.test(evidence)) return "FreeRide has no usable free model/key. Check gateway startup, provider quotas and configured keys.";
   if (/rate_limit|quota_exhausted/.test(evidence) || response.status === 429) return "Free provider quota or rate limit reached. Wait for reset or configure another eligible free provider.";
+  if (response.status >= 500) return `Upstream provider returned HTTP ${response.status}. The request may have been processed, so no automatic resend was made. In direct free-cloud mode, that provider is paused for 60 seconds; a later manual run may use another eligible provider.`;
   return `AI provider returned HTTP ${response.status}; check provider availability and gateway startup.`;
 }

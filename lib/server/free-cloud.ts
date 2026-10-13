@@ -2,7 +2,14 @@ import {createHash} from 'node:crypto';
 import {credential,db} from './store.ts';
 export type FreeRoute={provider:'groq'|'openrouter';model:string;endpoint:string;key:string;identity:string;parameters:Record<string,unknown>};
 const cache=new Map<string,{at:number;routes:FreeRoute[]}>();
-export function selectedAiProvider(){db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');return (db().prepare('SELECT provider FROM ai_routing WHERE id=1').get() as {provider:string}|undefined)?.provider||process.env.TEAM_AI_PROVIDER||'openrouter_free';}
+export function selectedAiProvider(){
+ db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');
+ const saved=(db().prepare('SELECT provider FROM ai_routing WHERE id=1').get() as {provider:string}|undefined)?.provider;
+ if(saved)return saved;
+ const configured=process.env.TEAM_AI_PROVIDER||'openrouter_free';
+ // Old .env files should not keep users on the compatibility gateway after upgrading.
+ return configured==='freeride'&&process.env.TEAM_KEEP_LEGACY_GATEWAY!=='1'?'free_cloud':configured;
+}
 export function saveAiRouting(provider:string){if(!['free_cloud','freeride','openrouter_free'].includes(provider))throw new Error('Choose a supported free router');db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');db().prepare('INSERT INTO ai_routing VALUES (1,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider').run(provider);return provider;}
 export async function freeCloudRoutes(fetcher:typeof fetch=fetch):Promise<FreeRoute[]>{
  const providers=[{provider:'groq' as const,key:process.env.FREERIDE_GROQ_FREE_CONFIRMED==='1'?credential('GROQ_API_KEY'):null,base:'https://api.groq.com/openai/v1'},{provider:'openrouter' as const,key:credential('TEAM_REMOTE_KEY'),base:'https://openrouter.ai/api/v1'}];
@@ -20,4 +27,4 @@ export async function freeCloudRoutes(fetcher:typeof fetch=fetch):Promise<FreeRo
  const routes=lists.flatMap(r=>r.status==='fulfilled'?r.value:[]).filter(r=>{const cool=db().prepare('SELECT expires FROM free_model_cooldowns WHERE model=?').get(r.provider+':'+r.model) as {expires:number}|undefined;return (!cool||cool.expires<Date.now())&&!db().prepare('SELECT identity FROM provider_blocks WHERE identity=?').get(r.identity);});
  if(!routes.length)throw new Error('No verified free cloud route available. Add OpenRouter or confirmed Groq free-plan keys in Settings; provider catalogs/quotas may be unavailable. No inference was made.');return routes;
 }
-export function coolFreeRoute(route:FreeRoute){db().prepare('INSERT OR REPLACE INTO free_model_cooldowns VALUES (?,?)').run(route.provider+':'+route.model,Date.now()+900000);}
+export function coolFreeRoute(route:FreeRoute,seconds=900){db().prepare('INSERT OR REPLACE INTO free_model_cooldowns VALUES (?,?)').run(route.provider+':'+route.model,Date.now()+seconds*1000);}
