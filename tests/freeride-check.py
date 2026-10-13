@@ -43,6 +43,7 @@ class GatewayTests(unittest.TestCase):
             if request.url.path.endswith('/chat/completions'):
                 body = json.loads(request.content); calls.append(body)
                 self.assertEqual(body['model'], 'test:free')
+                self.assertEqual(body['max_tokens'],2000)
                 if mode[0] == 'privacy':
                     return httpx.Response(403, json={'error':{'message':'No endpoints match data policy synthetic-private-secret'}})
                 if mode[0] == 'uncertain':
@@ -60,9 +61,11 @@ class GatewayTests(unittest.TestCase):
                 h={'Authorization':'Bearer '+'a'*64}
                 self.assertEqual(c.get('/health').status_code, 401)
                 self.assertEqual(c.get('/penguin/capabilities',headers=h).json()['paidFallback'], False)
-                request={'model':'auto','stream':False,'max_tokens':100,'messages':[{'role':'user','content':'Synthetic evidence only'}]}
+                self.assertEqual(c.get('/penguin/capabilities',headers=h).json()['maxOutputTokens'],4000)
+                request={'model':'auto','stream':False,'max_tokens':2000,'messages':[{'role':'user','content':'Synthetic evidence only'}]}
                 self.assertEqual(c.post('/v1/chat/completions',headers=h,json={**request,'model':'priced:free'}).status_code,400)
                 self.assertEqual(c.post('/v1/chat/completions',headers=h,json={**request,'stream':True}).status_code,400)
+                self.assertEqual(c.post('/v1/chat/completions',headers=h,json={**request,'max_tokens':4001}).status_code,400)
                 r=c.post('/v1/chat/completions',headers=h,json=request)
                 self.assertEqual(r.status_code,200,r.text)
                 self.assertEqual(r.json()['_freeride_provider'],'openrouter')

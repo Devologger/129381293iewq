@@ -86,3 +86,17 @@ A router cannot guarantee removal of a 403. The updated app distinguishes provid
 4. Switch back to `freeride`, restart Penguin, and keep the gateway running. An independently eligible Groq free account can provide fallback after an explicit rejection. Unknown/time-out/5xx inference outcomes never cascade automatically.
 
 Do not paste keys into chat. Remove the duplicate `TEAM_DAILY_CALL_LIMIT` line from your earlier configuration: keep only `TEAM_DAILY_CALL_LIMIT=9`.
+
+## Incomplete AI answer or Groq absent from the provider list
+
+Update the repository, rebuild Penguin, and restart **both** services after changing settings. The council now requests a complete review of at most 220 words, with a default output allowance of 2000 tokens. Provider reasoning can consume that allowance before visible text is returned. `TEAM_MAX_OUTPUT_TOKENS` is configurable from 256 to 4000, and the managed gateway accepts at most 4000. A truncated or empty answer remains a failed review; its usage is recorded and it is never automatically retried or treated as a completed strategy evaluation. The error now reports model, output limit and available token counts, without exposing reasoning traces.
+
+```dotenv
+TEAM_AI_PROVIDER=freeride
+TEAM_MAX_OUTPUT_TOKENS=2000
+FREERIDE_GROQ_FREE_CONFIRMED=1
+```
+
+Set the Groq confirmation only after verifying your account's free plan. Save the key in **Connections → Groq free-tier key**, not the OpenRouter field. **Check AI connection** now distinguishes a missing Groq key, missing free-plan confirmation, and a gateway that needs restarting. The gateway's startup prints key **presence only**, never key values. If you save a key after starting the gateway, restart it; keys are loaded at startup. If two project copies exist, both terminals must use the same project folder and `TERMINAL_DATA_DIR`.
+
+If the new error explicitly reports output-limit exhaustion, you can increase `TEAM_MAX_OUTPUT_TOKENS` to 4000 and restart Penguin; larger answers consume more free quota. Do not repeatedly click Run: failed attempts still count toward the daily limit.

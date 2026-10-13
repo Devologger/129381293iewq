@@ -119,7 +119,7 @@ def build_app():
         if not hmac.compare_digest(request.headers.get('authorization', ''), 'Bearer ' + token):
             return JSONResponse({'error': {'message': 'Private gateway authentication required'}}, status_code=401)
         if request.url.path == '/penguin/capabilities' and request.method == 'GET':
-            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2})
+            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2, 'maxOutputTokens': 4000})
         if request.method == 'GET' and request.url.path in ('/health', '/v1/models'):
             return await call_next(request)
         if request.method != 'POST' or request.url.path != '/v1/chat/completions':
@@ -130,10 +130,10 @@ def build_app():
         try:
             import json
             data = json.loads(body)
-            if data.get('model') != 'auto' or data.get('stream') is not False or not isinstance(data.get('max_tokens'), int) or not 1 <= data['max_tokens'] <= 1000:
+            if data.get('model') != 'auto' or data.get('stream') is not False or not isinstance(data.get('max_tokens'), int) or not 1 <= data['max_tokens'] <= 4000:
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
-            return JSONResponse({'error': {'message': 'Use auto, non-streaming and max_tokens <= 1000'}}, status_code=400)
+            return JSONResponse({'error': {'message': 'Use auto, non-streaming and max_tokens <= 4000'}}, status_code=400)
         counter = {'calls': 0}
         handle = attempts.set(counter)
         try:

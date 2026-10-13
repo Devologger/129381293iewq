@@ -56,7 +56,15 @@ export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
       if (!response.ok) throw new Error(await providerFailure(response));
       const info = await response.json();
       if (info.gateway !== "penguin-freeride" || info.localModels !== false || info.paidFallback !== false || info.maxUpstreamAttempts !== 2) throw new Error("Gateway safety configuration mismatch");
-      return { message: `FreeRide reachable. Remote providers: ${info.providers.filter((p: unknown) => p === "openrouter" || p === "groq").join(", ") || "none"}. Two upstream attempts maximum; no inference request made.` };
+      const providers = Array.isArray(info.providers) ? info.providers.filter((p: unknown) => p === "openrouter" || p === "groq") : [];
+      const hints: string[] = [];
+      if (!providers.includes("groq")) {
+        if (!credential("GROQ_API_KEY")) hints.push("Groq key is missing in Penguin: save it under Connections > Groq free-tier key, not the OpenRouter key field.");
+        else if (process.env.FREERIDE_GROQ_FREE_CONFIRMED !== "1") hints.push("Groq key is saved, but free-plan confirmation is off. After confirming your Groq free plan, set FREERIDE_GROQ_FREE_CONFIRMED=1 in .env.local and restart both services.");
+        else hints.push("Groq key and free-plan confirmation are present in Penguin, but this gateway has not loaded Groq. Stop the old FreeRide process with Ctrl+C and restart npm run freeride:start from this same project folder. Use the same TERMINAL_DATA_DIR.");
+      }
+      if (!Number.isInteger(info.maxOutputTokens) || info.maxOutputTokens < config.maxOutput) hints.push("This gateway has the older output cap. Update the project and restart FreeRideV3 before running the council.");
+      return { message: `FreeRide reachable. Remote providers: ${providers.join(", ") || "none"}. Two upstream attempts maximum; no inference request made. Council output cap: ${config.maxOutput} tokens. ${hints.join(" ")}`.trim() };
     } catch (error) { throw new Error(error instanceof Error && !error.message.includes("fetch") ? error.message : "FreeRide is not reachable. Keep npm run freeride:start running in a separate terminal."); }
   }
   if (config.provider !== "openrouter_free") return { message: "Use your provider console to verify the configured free model and quota. No inference request made." };
@@ -67,11 +75,16 @@ export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
   const model = await selectFreeModel(fetcher, config.model);
   return { message: `OpenRouter accepted key metadata access. Verified free catalog model: ${model}. This does not prove inference access; a council run will report model/privacy/region restrictions. No inference request made.` };
 }
+function outputLimit(fallback = 2000) {
+  const n = Number(process.env.TEAM_MAX_OUTPUT_TOKENS || fallback);
+  if (!Number.isInteger(n) || n < 256 || n > 4000) throw new Error("TEAM_MAX_OUTPUT_TOKENS must be an integer from 256 to 4000");
+  return n;
+}
 export function budgetConfig() {
   const provider = process.env.TEAM_AI_PROVIDER || "openrouter_free";
   if (!["openrouter_free", "free_remote", "freeride", "openai"].includes(provider)) throw new Error("TEAM_AI_PROVIDER must be openrouter_free, free_remote, freeride or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000)), maxOutput: 1000, model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000)), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -116,7 +129,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     inputRate = boundedEnv("TEAM_ESCALATION_INPUT_USD_PER_MILLION", 1, 1000); outputRate = boundedEnv("TEAM_ESCALATION_OUTPUT_USD_PER_MILLION", 5, 1000); cachedRate = inputRate;
   }
   cachedRate = Math.min(cachedRate, inputRate);
-  const instructions = `${SAFETY}\n${role.task}`;
+  const instructions = `${SAFETY}\n${role.task}\nReturn a complete final answer in at most 220 words. Use brief bullets for evidence, limits and next action. Do not output a long reasoning trace.`;
   // UTF-8 byte count is a conservative token bound; include provider framing overhead.
   const estimate = ((Buffer.byteLength(input + instructions, "utf8") + 2048) * inputRate + config.maxOutput * outputRate) / 1e6;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -151,7 +164,12 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     const costUsd = ((usage.input_tokens - cachedTokens) * inputRate + cachedTokens * cachedRate + usage.output_tokens * outputRate) / 1e6;
     db().prepare("UPDATE ai_calls SET charged=?, input_tokens=?, output_tokens=?, cached_tokens=?, status='ACCOUNTED' WHERE id=?").run(costUsd, usage.input_tokens, usage.output_tokens, cachedTokens, callId);
     const text = free ? body.choices?.[0]?.message?.content : body.output?.filter((item: { type: string }) => item.type === "message").flatMap((item: { content: { type: string; text?: string }[] }) => item.content.filter(c => c.type === "output_text").map(c => c.text || "")).join("\n");
-    if (typeof text !== "string" || !text || body.status === "incomplete" || body.choices?.[0]?.finish_reason === "length") throw new Error("AI answer incomplete; consumed tokens were accounted");
+    const modelLabel = String(body.model || model).replace(/[^a-zA-Z0-9/_.:-]/g, "").slice(0, 120);
+    const reasoning = usage.output_tokens_details?.reasoning_tokens ?? body.usage?.completion_tokens_details?.reasoning_tokens;
+    const reasoningLabel = Number.isSafeInteger(reasoning) && reasoning >= 0 ? `; reasoning tokens ${reasoning}` : "";
+    if (body.status === "incomplete" || body.choices?.[0]?.finish_reason === "length") throw new Error(`AI output limit reached (${modelLabel}; cap ${config.maxOutput}; output tokens ${usage.output_tokens}${reasoningLabel}). Consumed tokens were accounted; no automatic retry. Use a shorter question or increase TEAM_MAX_OUTPUT_TOKENS up to 4000, then restart Penguin.`);
+    if (body.choices?.[0]?.finish_reason === "content_filter" || body.choices?.[0]?.message?.refusal) throw new Error(`AI provider declined this answer (${modelLabel}); consumed tokens were accounted. No automatic retry.`);
+    if (typeof text !== "string" || !text.trim()) throw new Error(`AI returned no final answer (${modelLabel}; output tokens ${usage.output_tokens}${reasoningLabel}). Consumed tokens were accounted; no automatic retry. Reasoning text is not treated as a completed review.`);
     return { role: role.id, name: role.name, model: config.provider === "freeride" ? `${body._freeride_provider || "freeride"}/${body.model || model}` : model, text: text.slice(0, 10000), inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cachedTokens, costUsd };
   }
   throw new Error("Retry limit reached");
@@ -174,7 +192,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, research: bot.research, paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
   const memory = vaultMemory(workspaceId);
   const config = budgetConfig();
-  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 4, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 5, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
   const cached = db().prepare("SELECT state FROM team_runs WHERE workspace_id=? AND cache_key=? AND created>? ORDER BY created DESC").all(workspaceId, cacheKey, Date.now() - 21600000) as { state: string }[];
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };

@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {randomBytes} from 'node:crypto';
 import {db,createWorkspace,updateWorkspace,saveCredential} from '../lib/server/store.ts';
-import {runTeam,diagnoseProvider,budgetStatus} from '../lib/server/agent-team.ts';
+import {runTeam,diagnoseProvider,budgetStatus,budgetConfig} from '../lib/server/agent-team.ts';
 import {FREERIDE_URL,freerideToken,providerFailure} from '../lib/server/freeride.ts';
 import {vaultNotes,vaultNote,saveAgentMemory,generateVaultViews} from '../lib/server/vault.ts';
 const folder=mkdtempSync(join(tmpdir(),'penguin-check-'));
@@ -52,4 +52,35 @@ test('Obsidian browser isolates notes, excludes symlinks and creates real linked
 test('vault rejects symlinked notes', {skip:process.platform==='win32' ? 'Windows file symlinks require Developer Mode or administrator permission; validated on Linux' : false},()=>{
  const id=workspace();saveAgentMemory(id,'Private research context.');const directory=join(folder,'vault','Research',id);
  symlinkSync(join(folder,'freeride-gateway.token'),join(directory,'Secret.md'));assert.equal(vaultNotes(id).length,1);assert.throws(()=>vaultNote(id,'Secret.md'),/Unsafe/);
+});
+
+test('truncation and reasoning-only responses are accounted once and explain the failure',async()=>{
+ process.env.TEAM_AI_PROVIDER='freeride';process.env.TEAM_DAILY_CALL_LIMIT='30';
+ try {
+  let calls=0;
+  const fetcher=async(url,options)=>{calls++;assert.equal(JSON.parse(options.body).max_tokens,2000);return Response.json({model:'reasoning/test:free',usage:{prompt_tokens:20,completion_tokens:2000,completion_tokens_details:{reasoning_tokens:1980}},choices:[{finish_reason:'length',message:{content:'Unfinished draft',reasoning:'Hidden reasoning must not become an answer'}}]});};
+  const before=budgetStatus();const run=await runTeam(workspace(),context,'Truncation audit',false,fetcher);
+  assert.equal(run.status,'FAILED');assert.equal(calls,1);assert.equal(run.messages.length,0);assert.equal(run.note,undefined);
+  assert.match(run.error,/output limit reached/);assert.match(run.error,/cap 2000/);assert.match(run.error,/reasoning tokens 1980/);assert.ok(!run.error.includes('Hidden reasoning'));
+  assert.equal(budgetStatus().outputTokens,before.outputTokens+2000);
+  const empty=await runTeam(workspace(),context,'Empty answer audit',false,async()=>{calls++;return Response.json({model:'reasoning/test:free',usage:{prompt_tokens:10,completion_tokens:100},choices:[{finish_reason:'stop',message:{content:null,reasoning:'Do not display'}}]});});
+  assert.match(empty.error,/no final answer/);assert.equal(calls,2);assert.equal(empty.messages.length,0);
+ } finally {delete process.env.TEAM_AI_PROVIDER;delete process.env.TEAM_DAILY_CALL_LIMIT;}
+});
+test('bounded output allowance reaches the provider and completes reviews; invalid cap blocks calls',async()=>{
+ process.env.TEAM_AI_PROVIDER='freeride';process.env.TEAM_DAILY_CALL_LIMIT='30';process.env.TEAM_MAX_OUTPUT_TOKENS='4000';
+ try {let calls=0;const fetcher=async(url,options)=>{calls++;const request=JSON.parse(options.body);assert.equal(request.max_tokens,4000);assert.match(request.messages[0].content,/at most 220 words/);return Response.json({usage:{prompt_tokens:10,completion_tokens:40},choices:[{finish_reason:'stop',message:{content:'Complete bounded review.'}}]});};
+ const run=await runTeam(workspace(),context,'Configured allowance',false,fetcher);assert.equal(run.status,'COMPLETE');assert.equal(calls,3);
+ process.env.TEAM_MAX_OUTPUT_TOKENS='4001';assert.throws(()=>budgetConfig(),/256 to 4000/);await assert.rejects(runTeam(workspace(),context,'Invalid output cap',false,fetcher),/256 to 4000/);assert.equal(calls,3);
+ } finally {delete process.env.TEAM_AI_PROVIDER;delete process.env.TEAM_DAILY_CALL_LIMIT;delete process.env.TEAM_MAX_OUTPUT_TOKENS;}
+});
+test('Groq diagnostics distinguish missing key, confirmation, stale gateway and old output cap',async()=>{
+ process.env.TEAM_AI_PROVIDER='freeride';delete process.env.FREERIDE_GROQ_FREE_CONFIRMED;
+ const info={gateway:'penguin-freeride',providers:['openrouter'],localModels:false,paidFallback:false,maxUpstreamAttempts:2,maxOutputTokens:4000};
+ const fetcher=async()=>Response.json(info);
+ try {assert.match((await diagnoseProvider(fetcher)).message,/Groq key is missing/);saveCredential('GROQ_API_KEY','synthetic-only-groq-key');
+ assert.match((await diagnoseProvider(fetcher)).message,/confirmation is off/);process.env.FREERIDE_GROQ_FREE_CONFIRMED='1';
+ assert.match((await diagnoseProvider(fetcher)).message,/gateway has not loaded Groq/);info.providers.push('groq');assert.ok(!(await diagnoseProvider(fetcher)).message.includes('Groq key'));
+ info.maxOutputTokens=1000;assert.match((await diagnoseProvider(fetcher)).message,/older output cap/);
+ } finally {delete process.env.TEAM_AI_PROVIDER;delete process.env.FREERIDE_GROQ_FREE_CONFIRMED;}
 });

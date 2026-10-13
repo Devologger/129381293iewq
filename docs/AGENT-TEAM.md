@@ -32,7 +32,7 @@ for six hours; new research, journal evidence or questions invalidate it.
 The SQLite `ai_calls` table stores per-attempt reservations, model, UTC day,
 workspace/run/role, input/output/cached token usage, charged estimate and status.
 Limits are shared across all workspaces using the server's API credential.
-Free mode defaults to nine attempts/day and 1000 output tokens per call; it has no paid fallback. Explicit paid mode retains $1/day and $0.20/run accounting limits. See [current free-routing instructions](FREE-AI-AND-STRATEGIES.md).
+Free mode defaults to nine attempts/day and 2000 output tokens per call; it has no paid fallback. Explicit paid mode retains $1/day and $0.20/run accounting limits. See [current free-routing instructions](FREE-AI-AND-STRATEGIES.md).
 
 For explicit paid mode only, rates default to conservative estimates of $1/million input tokens and
 $5/million output tokens, with cached input charged at $1/million. Verify and
