@@ -100,3 +100,32 @@ FREERIDE_GROQ_FREE_CONFIRMED=1
 Set the Groq confirmation only after verifying your account's free plan. Save the key in **Connections → Groq free-tier key**, not the OpenRouter field. **Check AI connection** now distinguishes a missing Groq key, missing free-plan confirmation, and a gateway that needs restarting. The gateway's startup prints key **presence only**, never key values. If you save a key after starting the gateway, restart it; keys are loaded at startup. If two project copies exist, both terminals must use the same project folder and `TERMINAL_DATA_DIR`.
 
 If the new error explicitly reports output-limit exhaustion, you can increase `TEAM_MAX_OUTPUT_TOKENS` to 4000 and restart Penguin; larger answers consume more free quota. Do not repeatedly click Run: failed attempts still count toward the daily limit.
+
+## Updating after an output-limit failure
+
+If Apodex used 1,911 reasoning tokens out of a 2,000-token cap, almost no room remained for the visible answer. The managed gateway now defaults to concise chat routing: it excludes models advertising reasoning controls and known reasoning model families. This is a selection heuristic, not a guarantee about every provider model. If no eligible free model is available, the run stops or uses the eligible Groq fallback within the existing two-attempt limit; it never switches to paid inference.
+
+Stop both PowerShell processes with Ctrl+C. In your Penguin repository folder:
+
+```powershell
+git pull origin main
+npm.cmd run build
+```
+
+In `.env.local`, keep one entry for each setting (remove duplicates):
+
+```dotenv
+TEAM_AI_PROVIDER=freeride
+TEAM_MAX_OUTPUT_TOKENS=2000
+FREERIDE_ALLOW_REASONING_MODELS=0
+```
+
+Keep your existing keys private and unchanged. If you enabled Groq on its free plan, retain `FREERIDE_GROQ_FREE_CONFIRMED=1`. Start `npm.cmd run freeride:start` in one PowerShell window and `npm.cmd start` in a second. You do not need to reinstall FreeRide for this routing update. Check AI connection should now report `concise-chat` routing. Then run the council once. Earlier failed calls still count toward the UTC daily allowance.
+
+Optional: `FREERIDE_OPENROUTER_MODEL` pins an exact OpenRouter model ID, but the model must still pass the zero-price, context and reasoning filters. Leave it blank for automatic selection. Set `FREERIDE_ALLOW_REASONING_MODELS=1` only if you deliberately want reasoning models back; increasing the output cap alone may still produce an incomplete response.
+
+## Cinematic voice and mobile controls
+
+Open **Cinematic JARVIS** from navigation, the phone's JARVIS dock button, or the voice console's **Cinematic view** link. The dedicated route is `/jarvis`; its Fullscreen button also hides browser chrome where supported. Animated orbit rings, stars and an audio-reactive core accompany real selected-market and paper-account status. Press **Start microphone** explicitly to listen. **Stop microphone** or closing the view releases the microphone. Voices are your browser's installed speech voices, with a British English preference; this is not the film actor's voice. Browser recognition may require an Internet connection and a secure browser context. OS reduced-motion settings disable ambient animation.
+
+On phones, the bottom dock exposes Home, Markets, JARVIS, Team and More; More opens all workspace views. POC research results remain available under Strategy explorer.

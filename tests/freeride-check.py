@@ -30,6 +30,17 @@ class GatewayTests(unittest.TestCase):
             self.assertFalse(gateway.zero_price(m(prices)))
         self.assertFalse(gateway.zero_price(m({'prompt':'0','completion':'0'}, 'paid/model')))
 
+    def test_reasoning_models_are_excluded_unless_explicitly_enabled(self):
+        plain=Model('llama/chat:free','openrouter',32768)
+        apodex=Model('apodex/apodex-1.1-mini:free','openrouter',32768)
+        advertised=Model('ordinary-name:free','openrouter',32768,supported_parameters=('reasoning',))
+        self.assertTrue(gateway.research_model(plain))
+        self.assertFalse(gateway.research_model(apodex))
+        self.assertFalse(gateway.research_model(advertised))
+        with patch.dict(os.environ, {'PENGUIN_ALLOW_REASONING':'1'}):
+            self.assertTrue(gateway.research_model(advertised))
+            self.assertTrue(gateway.research_model(apodex))
+
     def test_actual_router(self):
         original = httpx.AsyncClient
         original_sync = httpx.Client
@@ -39,6 +50,7 @@ class GatewayTests(unittest.TestCase):
             if request.url.path.endswith('/models'):
                 return httpx.Response(200, json={'data': [
                     {'id':'test:free','context_length':32768,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'}},
+                    {'id':'apodex/apodex-1.1-mini:free','context_length':999999,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'0'},'supported_parameters':['reasoning']},
                     {'id':'priced:free','context_length':999999,'architecture':{'output_modalities':['text']},'pricing':{'prompt':'0','completion':'1'}}]})
             if request.url.path.endswith('/chat/completions'):
                 body = json.loads(request.content); calls.append(body)
@@ -62,6 +74,7 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(c.get('/health').status_code, 401)
                 self.assertEqual(c.get('/penguin/capabilities',headers=h).json()['paidFallback'], False)
                 self.assertEqual(c.get('/penguin/capabilities',headers=h).json()['maxOutputTokens'],4000)
+                self.assertEqual(c.get('/penguin/capabilities',headers=h).json()['routingPolicy'],'concise-chat')
                 request={'model':'auto','stream':False,'max_tokens':2000,'messages':[{'role':'user','content':'Synthetic evidence only'}]}
                 self.assertEqual(c.post('/v1/chat/completions',headers=h,json={**request,'model':'priced:free'}).status_code,400)
                 self.assertEqual(c.post('/v1/chat/completions',headers=h,json={**request,'stream':True}).status_code,400)

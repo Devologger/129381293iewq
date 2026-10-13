@@ -42,4 +42,47 @@ class StrategyLabTests(unittest.TestCase):
         data=candles();r=research(data,data[30]['time'],data[70]['time'])
         self.assertEqual(r['profile']['bars'],41);self.assertEqual(r['profile']['start_time'],data[30]['time'])
         with self.assertRaises(ValueError):research(data,1,2)
+
+class DistributionContextTests(unittest.TestCase):
+    def profile(self):
+        return dict(poc=100, val=95, vah=105, end_time=10)
+    def bars(self, rows):
+        return [dict(time=11+i, low=low, high=high, close=close) for i,(low,high,close) in enumerate(rows)]
+    def test_poc_support_requires_touch_and_following_hold(self):
+        from research.strategy_lab import distribution_context
+        result=distribution_context(self.profile(),self.bars([(99.8,103,102),(101,104,103)]))
+        self.assertEqual(result['bias'],'bullish');self.assertTrue(result['confirmed_retest'])
+        self.assertEqual(result['confirmation'],'poc_support_retest_confirmed')
+    def test_poc_resistance_requires_touch_and_following_rejection(self):
+        from research.strategy_lab import distribution_context
+        result=distribution_context(self.profile(),self.bars([(97,100.2,98),(96,99,97)]))
+        self.assertEqual(result['bias'],'bearish');self.assertTrue(result['confirmed_retest'])
+    def test_inside_band_missing_bars_or_mixed_sides_stay_neutral(self):
+        from research.strategy_lab import distribution_context
+        for rows in [[(99,101,100)],[(99,101,100.1),(99,101,99.9)],[(99,103,102),(97,101,98)]]:
+            self.assertEqual(distribution_context(self.profile(),self.bars(rows))['bias'],'neutral')
+        old=[dict(time=9,low=99,high=103,close=102),dict(time=10,low=99,high=104,close=103)]
+        self.assertEqual(distribution_context(self.profile(),old)['bias'],'neutral')
+    def test_last_bar_touch_without_follow_up_is_not_retest_confirmation(self):
+        from research.strategy_lab import distribution_context
+        result=distribution_context(self.profile(),self.bars([(101,104,103),(99.9,103,102)]))
+        self.assertEqual(result['bias'],'bullish');self.assertFalse(result['confirmed_retest'])
+    def test_poc_strategy_freezes_before_reclaim_and_requires_retest_hold(self):
+        data=candles()[-180:]
+        for i, close, low in [(-3,99,98),(-2,102,101),(-1,103,100)]:
+            data[i]=dict(data[i],open=close,close=close,low=low,high=close+1)
+        seen=[]
+        def frozen(history):
+            seen.append(history[-1]['time']);return dict(poc=100,val=95,vah=105)
+        with patch('research.strategy_lab.volume_profile',side_effect=frozen),patch('research.strategy_lab.atr',return_value=2):
+            self.assertTrue(signal(data,'frvp_poc_reclaim',100))
+            self.assertEqual(seen,[data[-4]['time']])
+            data[-1]=dict(data[-1],close=99,low=98)
+            self.assertFalse(signal(data,'frvp_poc_reclaim',100))
+
+    def test_default_display_distribution_excludes_confirmation_bars(self):
+        data=candles();result=research(data)
+        self.assertEqual(result['profile']['end_time'],data[-3]['time'])
+        self.assertEqual(result['profile_context']['confirmation_bars'],2)
+
 if __name__=='__main__':unittest.main()

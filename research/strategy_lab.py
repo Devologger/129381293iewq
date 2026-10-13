@@ -58,6 +58,37 @@ def volume_profile(candles, bins=24, value_area=.70):
                 methodology="OHLCV approximation: candle volume uniformly distributed across its high-low range. Not tick-level volume-at-price; no bid/ask or order-book evidence.")
 
 
+def distribution_context(profile, candles):
+    """Confirm a frozen distribution with later closed bars; this is context, not an order."""
+    after = [c for c in candles if c["time"] > profile["end_time"]]
+    observations = after[-6:]
+    tolerance = max((profile["vah"]-profile["val"])*.05, profile["poc"]*.0015)
+    close = candles[-1]["close"]
+    location = "above_value_area" if close > profile["vah"] else "below_value_area" if close < profile["val"] else "inside_value_area"
+    bias = "neutral"
+    confirmation = "waiting_for_two_closed_bars"
+    retest = False
+    if len(observations) >= 2:
+        last = observations[-2:]
+        if all(c["close"] > profile["poc"] + tolerance for c in last):
+            bias, confirmation = "bullish", "accepted_above_poc"
+        elif all(c["close"] < profile["poc"] - tolerance for c in last):
+            bias, confirmation = "bearish", "accepted_below_poc"
+        else:
+            confirmation = "balanced_or_unconfirmed"
+        for i, bar in enumerate(observations[:-1]):
+            touched = bar["low"] <= profile["poc"]+tolerance and bar["high"] >= profile["poc"]-tolerance
+            follow = observations[i+1]["close"]
+            if bias == "bullish" and touched and bar["close"] > profile["poc"]+tolerance and follow > profile["poc"]+tolerance:
+                retest, confirmation = True, "poc_support_retest_confirmed"
+            if bias == "bearish" and touched and bar["close"] < profile["poc"]-tolerance and follow < profile["poc"]-tolerance:
+                retest, confirmation = True, "poc_resistance_retest_confirmed"
+    return dict(bias=bias, confirmation=confirmation, confirmed_retest=retest, location=location,
+                poc=profile["poc"], tolerance=round(tolerance, 8), last_close=close,
+                profile_end=profile["end_time"], as_of=candles[-1]["time"], confirmation_bars=len(after),
+                methodology="Frozen POC distribution: two later closed bars must accept above/below its tolerance band. A POC retest requires a touching bar and a following close on the same side. Neutral when evidence is missing or mixed. Context only, not a buy/sell instruction.")
+
+
 def atr(history, length=14):
     rows=history[-length-1:]
     return sum(max(c["high"]-c["low"], abs(c["high"]-rows[i-1]["close"]), abs(c["low"]-rows[i-1]["close"])) for i,c in enumerate(rows[1:],1))/max(1,len(rows)-1)
@@ -75,11 +106,12 @@ def signal(history, family, parameter):
     close=history[-1]["close"]; previous=history[-2]["close"]
     if family in ("frvp_vah_retest", "frvp_poc_reclaim"):
         # Freeze the consolidation profile BEFORE breakout/retest candles.
-        profile=volume_profile(history[-parameter-2:-2])
+        profile=volume_profile(history[-parameter-2:-2] if family=="frvp_vah_retest" else history[-parameter-3:-3])
         tolerance=atr(history)*.25
         if family=="frvp_vah_retest":
             return previous>profile["vah"] and history[-1]["low"]<=profile["vah"]+tolerance and close>profile["vah"]
-        return previous<=profile["poc"] and close>profile["poc"] and close>=profile["val"]
+        return (history[-3]["close"]<=profile["poc"] and previous>profile["poc"]+tolerance
+                and history[-1]["low"]<=profile["poc"]+tolerance and close>profile["poc"]+tolerance)
     if family=="donchian_breakout":
         return close>max(c["high"] for c in history[-parameter-1:-1])
     if family=="ema_trend_pullback":
@@ -151,12 +183,13 @@ def research(candles, range_start=None, range_end=None):
               and candidate["test"]["drawdown_r"]<=5)
     chosen=[c for c in candles if (range_start is None or c["time"]>=range_start) and (range_end is None or c["time"]<=range_end)]
     if not chosen: raise ValueError("Fixed range contains no candles")
+    frozen = volume_profile(chosen if range_start is not None or range_end is not None else candles[-122:-2])
     return dict(as_of=candles[-1]["time"],bars=n,coverage_days=round((candles[-1]["time"]-candles[0]["time"])/86400,2),
                 split=dict(training_end=training,validation_end=validation,test_end=n),studies=selected,
                 training_selected=dict(strategy=candidate["strategy"],parameter=candidate["parameter"]),
                 candidate=candidate["strategy"] if eligible else None,
                 decision="forward_paper_trial_only" if eligible else "insufficient_edge_evidence",
-                profile=volume_profile(chosen if range_start is not None or range_end is not None else candles[-120:]),
+                profile=frozen, profile_context=distribution_context(frozen, candles),
                 methodology="Long-only research: 60/20/20 chronological splits; training-only family/parameter selection; next-bar open entries; 2 ATR stop, 2R target, 24-bar timeout; adverse gaps and stop-first ambiguity; 12 bps/side, stress 24 bps/side. No new strategy is deployed automatically. Forward slices are robustness diagnostics with a training-selected fixed parameter; they are not independent nested walk-forward model selection.",
                 limitations=["OHLCV profile is an estimated distribution, not true trade-level fixed-range volume.","Displayed tests of many families can cause selection bias; preserve a future untouched data set.","No funding, borrowing, queue position, latency or market-impact model; no monthly-profit forecast.","Obsidian memory updates agent context; it does not fine-tune neural model weights."])
 

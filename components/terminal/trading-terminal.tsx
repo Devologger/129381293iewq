@@ -13,7 +13,7 @@ import type { Bot, Workspace } from "@/lib/server/store";
 import { INITIAL_PORTFOLIO, demoCandles, matchesFeed, vaultReport, type Feed, type Portfolio, type Research } from "@/lib/terminal-engine";
 import "./terminal.css";
 
-type View = "terminal" | "markets" | "research" | "vault" | "integrations" | "demo" | "team" | "explorer";
+type View = "terminal" | "markets" | "research" | "vault" | "integrations" | "demo" | "team" | "explorer" | "jarvis";
 const ICONS: Record<string, string> = {
   grid: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   chart: "M3 19h18 M5 15l4-5 4 3 6-9 M15 4h4v4",
@@ -29,11 +29,28 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) { return <sv
 const usd = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: value < 1 ? 4 : 2, maximumFractionDigits: value < 1 ? 4 : 2 });
 const NAMES: Record<string, string> = { BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", XRP: "XRP" };
-const NAV: { view: View; icon: string; label: string }[] = [{ view: "terminal", icon: "grid", label: "Command center" }, { view: "markets", icon: "chart", label: "Market workspace" }, { view: "research", icon: "brain", label: "Strategy lab" }, { view: "vault", icon: "vault", label: "Knowledge vault" }, { view: "explorer", icon: "chart", label: "Strategy explorer" }, { view: "demo", icon: "shield", label: "Binance demo desk" }, { view: "team", icon: "brain", label: "AI research team" }, { view: "integrations", icon: "link", label: "Connections" }];
+const NAV: { view: View; icon: string; label: string }[] = [{ view: "terminal", icon: "grid", label: "Command center" }, { view: "markets", icon: "chart", label: "Market workspace" }, { view: "research", icon: "brain", label: "Strategy lab" }, { view: "vault", icon: "vault", label: "Knowledge vault" }, { view: "explorer", icon: "chart", label: "Strategy explorer" }, { view: "demo", icon: "shield", label: "Binance demo desk" }, { view: "team", icon: "brain", label: "AI research team" }, { view: "integrations", icon: "link", label: "Connections" }, { view: "jarvis", icon: "mic", label: "Cinematic JARVIS" }];
 const EMPTY_LEVELS: { price: number; label: string; confirmed: boolean }[] = [];
 
-export function TradingTerminal() {
-  const [view, setView] = useState<View>("terminal");
+export function TradingTerminal({ initialView = "terminal" }: { initialView?: View }) {
+  const [view, setView] = useState<View>(initialView);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!mobileMenu) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenu(false);
+      if (event.key !== "Tab") return;
+      const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>("button");
+      if (!buttons?.length) return;
+      const first = buttons[0], last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); if (previous?.isConnected) previous.focus(); };
+  }, [mobileMenu]);
   const [exchange, setExchange] = useState("binance");
   const [market, setMarket] = useState("spot");
   const [timeframe, setTimeframe] = useState("15m");
@@ -58,6 +75,7 @@ export function TradingTerminal() {
   const [command, setCommand] = useState("");
   const [jarvisOpen, setJarvisOpen] = useState(false);
   const closeJarvis = useCallback(() => setJarvisOpen(false), []);
+  const exitCinematic = useCallback(() => setView("terminal"), []);
   const [discord, setDiscord] = useState(false);
   const [localTolerance, setTolerance] = useState(.08);
   const [aiBusy, setAiBusy] = useState(false);
@@ -250,7 +268,7 @@ export function TradingTerminal() {
     }
     if (value === "run research") { await runResearch(); return "Research request completed. Check Strategy Lab for the evidence or any feed error."; }
     if (value === "export report" || value.startsWith("show ")) { executeCommand(value); return "Workspace command processed. Your selected view is available behind this assistant."; }
-    setView("team");
+    if (view !== "jarvis") setView("team");
     const response = await fetch("/api/terminal/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "run", contextKey: view === "demo" ? `binance-demo:perpetual:${symbol}USDT:${timeframe}` : feedKey, question: /^(run team|run agents|convene team)$/.test(value) ? "Review our current evidence and propose the next bounded experiment." : text }) });
     const run = await response.json(); if (!response.ok || run.status !== "COMPLETE") throw new Error(run.error || "Research team unavailable");
     return `${run.cacheHit ? "Retrieved a cached council briefing. " : "Council briefing saved to your Obsidian vault. "}${run.messages.at(-1)?.text || "Review the team history for the full discussion."}`;
@@ -278,6 +296,7 @@ export function TradingTerminal() {
     </section>;
   };
 
+  if (view === "jarvis") return <div className="ot-root penguin-hud penguin-cinematic-shell"><JarvisAssistant open fullscreen onClose={exitCinematic} onCommand={assistantCommand} telemetry={{ market: `${symbol} · ${exchange.toUpperCase()} · ${timeframe}`, source: source === "demo" ? "SYNTHETIC SAMPLE" : feedError ? "FEED UNAVAILABLE" : "EXCHANGE CLOSED BARS", price: last ? price(last.close) : "—", paper: loaded ? `${usd(portfolio.cash)} · ${portfolio.paused ? "PAUSED" : "RUNNING"}` : "LOADING", positions: portfolio.positions.length }} /></div>;
   return <div className="ot-root penguin-hud"><div className="penguin-hud-grid" aria-hidden="true" /><div className="penguin-hud-orbit" aria-hidden="true" />
     <aside className="ot-sidebar">
       <Link href="/terminal" className="ot-brand"><div className="ot-brand-mark">◈</div><div>PENGUIN<small>INTELLIGENT TRADING</small></div></Link>
@@ -310,6 +329,8 @@ export function TradingTerminal() {
         {workerStatus.error && <div className="ot-feed-error">Server worker: {workerStatus.error}</div>}<footer className="ot-footer"><span><i className="ot-dot" /> {busy ? "Refreshing market data" : "Workspace online"}</span><span>PENGUIN / RESEARCH BEFORE EXECUTION</span><span>{workerStatus.at ? "SERVER WORKER ONLINE" : "SERVER WORKER STARTING"} <span className="ot-footer-line">|</span> {source === "demo" ? "SAMPLE DATA" : "EXCHANGE CANDLES"}</span></footer>
       </main>
     </div>
+    <nav className="penguin-mobile-dock" aria-label="Mobile workspace navigation">{NAV.filter(n => ["terminal", "markets", "jarvis", "team"].includes(n.view)).map(n => <button key={n.view} aria-label={n.label} className={view === n.view ? "active" : ""} onClick={() => setView(n.view)}><Icon name={n.icon} /><span>{n.view === "terminal" ? "Home" : n.view === "markets" ? "Markets" : n.view === "jarvis" ? "JARVIS" : "Team"}</span></button>)}<button aria-label="More workspace views" aria-expanded={mobileMenu} onClick={() => setMobileMenu(true)}><Icon name="grid" /><span>More</span></button></nav>
+    {mobileMenu && <div ref={menuRef} className="penguin-mobile-menu" role="dialog" aria-modal="true" aria-label="All workspace views"><div className="ot-panel-title"><h2>Your workspace</h2><button autoFocus aria-label="Close workspace menu" onClick={() => setMobileMenu(false)}>×</button></div>{NAV.map(n => <button key={n.view} onClick={() => { setView(n.view); setMobileMenu(false); }}><Icon name={n.icon} /><span>{n.label}</span><Icon name="arrow" /></button>)}</div>}
     <JarvisAssistant open={jarvisOpen} onClose={closeJarvis} onCommand={assistantCommand} />
     {notice && <div className="ot-toast" role="status" aria-live="polite"><Icon name="check" size={15} /><span>{notice}</span></div>}
     {modal && <div className="ot-modal-backdrop" onClick={() => setModal(false)}><section ref={modalRef} className="ot-modal" role="dialog" aria-modal="true" aria-label="Edit market watchlist" onClick={e => e.stopPropagation()}><div className="ot-panel-title"><h2>Your market orbit</h2><button autoFocus className="ot-icon-button" onClick={() => setModal(false)} aria-label="Close watchlist editor"><Icon name="close" /></button></div><p>Add up to eight base symbols. Quote currency follows the selected exchange: USDT for Binance/Bybit, USD for Kraken. Availability is checked by the exchange.</p><div className="ot-watchlist-edit">{watchlist.map(s => <div key={s}><span>{s}</span><button aria-label={`Remove ${s}`} disabled={watchlist.length === 1} onClick={() => { const next = watchlist.filter(t => t !== s); void saveWatchlist(next); }}><Icon name="close" size={14} /></button></div>)}</div><form onSubmit={e => { e.preventDefault(); const s = newSymbol.trim().toUpperCase().replace(/\/(USDT|USD)$/, ""); if (!/^[A-Z0-9]{2,12}$/.test(s)) return notify("Enter a base symbol such as BTC, DOGE, or AVAX."); if (watchlist.length >= 8) return notify("Maximum eight markets per workspace."); if (watchlist.includes(s)) return notify("That market is already in your watchlist."); void saveWatchlist([...watchlist, s]); setNewSymbol(""); }}><label htmlFor="new-symbol">Base market symbol</label><div><input id="new-symbol" placeholder="e.g. AVAX" value={newSymbol} onChange={e => setNewSymbol(e.target.value)} /><button className="ot-primary" type="submit"><Icon name="plus" size={15} />Add market</button></div></form><button className="ot-secondary" onClick={() => setModal(false)}>Done <Icon name="check" size={14} /></button></section></div>}

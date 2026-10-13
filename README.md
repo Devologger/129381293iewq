@@ -125,3 +125,11 @@ Gateway integration checks (after installation):
 ```
 
 On Linux, use `.runtime/freeride-venv/bin/python tests/freeride-check.py`. These checks run the actual installed FreeRide engine with synthetic upstream responses; they do not spend provider quota or use real keys.
+
+### Cinematic mobile workspace and distribution confirmation
+
+The dedicated `/jarvis` page adds a fullscreen voice console with animated orbital rings, stars, audio response and selected-market/paper-account telemetry. Mobile navigation uses a labeled bottom dock and an all-views menu. The interface respects reduced motion and releases microphone tracks when stopped or closed.
+
+Strategy explorer now reports bullish, bearish or neutral **POC distribution context**. The default profile freezes the preceding 120 candles before the latest two closed candles. Two later closes above POC plus its tolerance indicate bullish acceptance; two below indicate bearish acceptance; mixed or missing confirmation stays neutral. Tolerance is the larger of 5% of the value-area width and 0.15% of POC. A confirmed retest requires a touch of this band, a close back on the accepted side and a subsequent close holding that side. An explicit range ending at the latest candle has no later confirmation yet. The POC-reclaim research strategy also freezes its profile before its crossing/retest sequence.
+
+This context is included in council inputs and saved Obsidian strategy notes. It is an OHLCV-based volume estimate and research evidence, not a guarantee or automatic deployment instruction. The managed FreeRide gateway defaults to concise-chat model filtering to reduce reasoning-token exhaustion; see the [Windows update steps](docs/FREERIDE-WINDOWS.md#updating-after-an-output-limit-failure).

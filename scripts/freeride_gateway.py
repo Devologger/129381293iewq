@@ -6,6 +6,7 @@ import contextvars
 import hmac
 import math
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -29,6 +30,15 @@ def zero_price(model):
                 and all(v is not None and str(v).strip() and math.isfinite(float(v)) and float(v) == 0 for v in prices.values()))
     except (ValueError, TypeError):
         return False
+
+
+def research_model(model):
+    """Prefer ordinary chat: reasoning can consume the entire free output allowance."""
+    if os.environ.get('PENGUIN_ALLOW_REASONING') == '1':
+        return True
+    if set(model.supported_parameters) & {'reasoning', 'reasoning_effort', 'include_reasoning'}:
+        return False
+    return not re.search(r'apodex|gpt-oss|qwq|qwen3|reasoner|thinking|nemotron|deepseek.*r1|(?:^|[/_-])r1(?:$|[/_-])', model.api_id, re.I)
 
 
 class BoundedProvider:
@@ -80,13 +90,15 @@ class BoundedProvider:
 
 class StrictOpenRouter(BoundedProvider, OpenRouterProvider):
     def list_free_models(self, key):
-        return [m for m in super().list_free_models(key) if zero_price(m)]
+        models = [m for m in super().list_free_models(key) if zero_price(m) and research_model(m)]
+        pinned = os.environ.get('PENGUIN_OPENROUTER_MODEL', '')
+        return [m for m in models if m.api_id == pinned] if pinned else models
 
 
 class FreeGroq(BoundedProvider, GroqProvider):
     def list_free_models(self, key):
         # Exclude compound agents with server-side tools and tool billing.
-        return [m for m in super().list_free_models(key) if not m.api_id.startswith('groq/compound')]
+        return [m for m in super().list_free_models(key) if not m.api_id.startswith('groq/compound') and research_model(m) and m.context_length >= 16384]
 
 
 
@@ -119,7 +131,7 @@ def build_app():
         if not hmac.compare_digest(request.headers.get('authorization', ''), 'Bearer ' + token):
             return JSONResponse({'error': {'message': 'Private gateway authentication required'}}, status_code=401)
         if request.url.path == '/penguin/capabilities' and request.method == 'GET':
-            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2, 'maxOutputTokens': 4000})
+            return JSONResponse({'gateway': 'penguin-freeride', 'providers': [p.name for p in providers], 'localModels': False, 'paidFallback': False, 'maxUpstreamAttempts': 2, 'maxOutputTokens': 4000, 'routingPolicy': 'reasoning-opt-in' if os.environ.get('PENGUIN_ALLOW_REASONING') == '1' else 'concise-chat', 'openrouterModel': os.environ.get('PENGUIN_OPENROUTER_MODEL', '')})
         if request.method == 'GET' and request.url.path in ('/health', '/v1/models'):
             return await call_next(request)
         if request.method != 'POST' or request.url.path != '/v1/chat/completions':
