@@ -57,6 +57,8 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(body['model'], 'test:free')
                 self.assertEqual(body['reasoning'], {'enabled':False})
                 self.assertEqual(body['max_tokens'],2000)
+                if mode[0] == 'badrequest':
+                    return httpx.Response(400, json={'error':{'message':'synthetic rejected parameters'}})
                 if mode[0] == 'privacy':
                     return httpx.Response(403, json={'error':{'message':'No endpoints match data policy synthetic-private-secret'}})
                 if mode[0] == 'uncertain':
@@ -89,6 +91,10 @@ class GatewayTests(unittest.TestCase):
                 r=c.post('/v1/chat/completions',headers=h,json=request)
                 self.assertEqual(r.status_code,503,r.text)
                 self.assertEqual(len(calls),2,'Uncertain inference must not retry')
+                mode[0]='badrequest'
+                r=c.post('/v1/chat/completions',headers=h,json=request)
+                self.assertEqual(r.status_code,400,r.text)
+                self.assertEqual(r.json()['error']['type'],'request_rejected')
                 mode[0]='privacy'
                 r=c.post('/v1/chat/completions',headers=h,json=request)
                 self.assertEqual(r.status_code,403,r.text)
@@ -155,6 +161,35 @@ class GatewayTests(unittest.TestCase):
                 response = client.get('/penguin/readiness', headers=h)
                 self.assertEqual(response.json()['providers'][0]['status'], 'key_rejected')
                 self.assertNotIn('synthetic-private-secret', response.text)
+
+    def test_groq_free_gpt_oss_uses_low_effort_and_separate_timeouts(self):
+        import asyncio
+        from freeride.core.chat_schema import ChatRequest
+        original = httpx.AsyncClient
+        requests = []
+        def upstream(request):
+            payload = json.loads(request.content)
+            requests.append(payload)
+            self.assertEqual(payload['reasoning_effort'], 'low')
+            self.assertEqual(payload['max_tokens'], 2000)
+            return httpx.Response(200, json={'id':'synthetic','object':'chat.completion','created':1,'model':payload['model'],'choices':[{'index':0,'message':{'role':'assistant','content':'Bounded review.'},'finish_reason':'stop'}],'usage':{'prompt_tokens':10,'completion_tokens':5}})
+        def client(*args, **kwargs):
+            self.assertEqual(kwargs['timeout'],45)
+            kwargs['transport'] = httpx.MockTransport(upstream)
+            return original(*args, **kwargs)
+        provider = gateway.FreeGroq(http_timeout=45)
+        model = Model('openai/gpt-oss-20b','groq',131072)
+        with patch.object(gateway.GroqProvider,'list_free_models',return_value=[model]):
+            self.assertEqual(provider.list_free_models('synthetic')[0].api_id,model.api_id)
+        async def run():
+            handle = gateway.attempts.set({'calls':0})
+            try:
+                return await provider.forward_chat(ChatRequest(model='auto',max_tokens=2000,messages=[{'role':'user','content':'Synthetic'}]),model.api_id,'synthetic')
+            finally:
+                gateway.attempts.reset(handle)
+        with patch('httpx.AsyncClient',side_effect=client):
+            asyncio.run(run())
+        self.assertEqual(len(requests),1)
 
     def test_bounded_attempts(self):
         import asyncio

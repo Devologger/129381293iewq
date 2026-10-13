@@ -4,6 +4,7 @@ Remote inference only. No upstream CLI plugins, global config or local models.
 """
 import asyncio
 import time
+import hashlib
 import contextvars
 import hmac
 import math
@@ -54,15 +55,21 @@ class BoundedProvider:
             selected = next((m for m in models if m.context_length >= 16384 and 'text' in m.output_modalities), None)
         if selected is None:
             raise RuntimeError('No eligible free model')
+        if self.name == 'groq' and selected.api_id.startswith('openai/gpt-oss-'):
+            request = request.model_copy(update={'reasoning_effort': 'low'})
         if self.name == 'openrouter' and os.environ.get('PENGUIN_ALLOW_REASONING') != '1' and 'reasoning' in selected.supported_parameters:
             request = request.model_copy(update={'reasoning': {'enabled': False}})
         count['calls'] += 1
         count.pop('failure', None)
+        count.pop('rejection_status', None)
         try:
             return await super().forward_chat(request, selected.api_id, key)
         except httpx.HTTPError as error:
             response = getattr(error, 'response', None)
             status = getattr(response, 'status_code', None)
+            if status in (400,401,403,404,429):
+                count['rejection_status'] = status
+                count['failure'] = {400:'request_rejected',401:'authentication_rejected',403:'access_denied',404:'model_unavailable',429:'provider_rate_limit'}[status]
             if status == 403:
                 evidence = response.text[:16000].lower()
                 if any(word in evidence for word in ('privacy', 'data policy', 'data_policy')):
@@ -72,11 +79,13 @@ class BoundedProvider:
                 else:
                     count['failure'] = 'access_denied'
             if status is None or status >= 500:
+                count['failure'] = 'upstream_uncertain'
                 count['calls'] = 2  # FreeRide's engine can cascade UNKNOWN; stop outbound calls explicitly.
             raise
         except Exception:
             count['calls'] = 2
-            count.pop('failure', None)
+            count['failure'] = 'upstream_uncertain'
+            count.pop('rejection_status', None)
             raise RuntimeError('Provider outcome uncertain') from None
 
     def classify_error(self, value):
@@ -90,17 +99,28 @@ class BoundedProvider:
         return super().classify_error(value)
 
 
-class StrictOpenRouter(BoundedProvider, OpenRouterProvider):
+class CatalogCache:
+    def catalog(self, key, provider):
+        cached = getattr(self, '_penguin_catalog', None)
+        identity = hashlib.sha256(key.encode()).digest()
+        if cached and cached[0] == identity and time.monotonic() - cached[1] < 60:
+            return cached[2]
+        models = provider(http_timeout=10).list_free_models(key)
+        self._penguin_catalog = (identity, time.monotonic(), models)
+        return models
+
+
+class StrictOpenRouter(BoundedProvider, CatalogCache, OpenRouterProvider):
     def list_free_models(self, key):
-        models = [m for m in super().list_free_models(key) if zero_price(m) and research_model(m)]
+        models = [m for m in self.catalog(key, OpenRouterProvider) if zero_price(m) and research_model(m)]
         pinned = os.environ.get('PENGUIN_OPENROUTER_MODEL', '')
         return [m for m in models if m.api_id == pinned] if pinned else models
 
 
-class FreeGroq(BoundedProvider, GroqProvider):
+class FreeGroq(BoundedProvider, CatalogCache, GroqProvider):
     def list_free_models(self, key):
         # Exclude compound agents with server-side tools and tool billing.
-        return [m for m in super().list_free_models(key) if not m.api_id.startswith('groq/compound') and research_model(m) and m.context_length >= 16384]
+        return [m for m in self.catalog(key, GroqProvider) if not m.api_id.startswith('groq/compound') and (research_model(m) or m.api_id in ('openai/gpt-oss-20b','openai/gpt-oss-120b')) and m.context_length >= 16384]
 
 
 
@@ -123,9 +143,9 @@ def build_app():
     smart_routing._CACHE_PATH = state / 'leaderboard.json'
     providers = []
     if os.environ.get('OPENROUTER_API_KEY'):
-        providers.append(StrictOpenRouter(http_timeout=10))
+        providers.append(StrictOpenRouter(http_timeout=45))
     if os.environ.get('GROQ_API_KEY') and os.environ.get('PENGUIN_GROQ_FREE_CONFIRMED') == '1':
-        providers.append(FreeGroq(http_timeout=10))
+        providers.append(FreeGroq(http_timeout=45))
     app = create_app(providers=providers, verbose=False)
     readiness_cache = {}
     async def readiness():
@@ -189,7 +209,7 @@ def build_app():
                 invalidate_catalog()
                 return JSONResponse({'error': {'type': 'gateway_not_ready', 'message': 'FreeRide could not resolve an eligible model; no inference request was made.'}}, status_code=409)
             if response.status_code >= 400 and counter.get('failure'):
-                return JSONResponse({'error': {'type': counter['failure'], 'message': 'Provider explicitly denied access.'}}, status_code=403)
+                return JSONResponse({'error': {'type': counter['failure'], 'message': 'Provider request failed; sanitized category only.'}}, status_code=counter.get('rejection_status', 503))
             return response
         finally:
             attempts.reset(handle)

@@ -64,7 +64,7 @@ export async function diagnoseProvider(fetcher: typeof fetch = fetch) {
         const readiness = await check.json();
         for (const row of readiness.providers || []) {
           const provider = row.provider === "groq" ? "Groq" : row.provider === "openrouter" ? "OpenRouter" : "Provider";
-          const statuses: Record<string,string> = {ready: `${Number(row.eligibleModels) || 0} eligible free models`,cooldown: `key cooling down; retry in ${Math.max(0, Number(row.retryAfterSeconds) || 0)} seconds`,key_rejected: "catalog access rejected; check key/account/privacy restrictions",no_eligible_models: "no models pass the free/context filters; check any model pin",catalog_rate_limited: "catalog rate limited; wait for provider reset",catalog_unavailable: "catalog unavailable; check gateway network access"};
+          const statuses: Record<string,string> = {ready: `${Number(row.eligibleModels) || 0} eligible free models`,cooldown: `key cooling down; retry in ${Math.max(0, Number(row.retryAfterSeconds) || 0)} seconds`,key_rejected: "catalog access rejected; check key/account/privacy restrictions",no_eligible_models: row.provider === "groq" ? "no catalog models pass the confirmed free-plan/context gates" : "no models pass the free/context filters; check any OpenRouter model pin",catalog_rate_limited: "catalog rate limited; wait for provider reset",catalog_unavailable: "catalog unavailable; check gateway network access"};
           hints.push(`${provider}: ${statuses[row.status] || "unavailable"}.`);
         }
         if (!readiness.ready) throw new Error(`FreeRide is reachable but not ready. ${hints.join(" ")} No inference request made.`);
@@ -159,7 +159,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
   for (let attempt = 0; attempt < 2; attempt++) {
     const callId = reserve(workspaceId, run.id, role.id, model, estimate);
     let response: Response;
-    try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
+    try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(config.provider === "freeride" ? 90000 : 60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
     catch { db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
     if (!response.ok) {
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.

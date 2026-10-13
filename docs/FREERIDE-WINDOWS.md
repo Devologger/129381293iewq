@@ -161,3 +161,11 @@ Update Penguin, stop both old processes, rebuild and use `npm.cmd run launch`. T
 The earlier filter incorrectly excluded every model advertising optional reasoning. Those models now remain eligible, with OpenRouter `reasoning.enabled=false`; known reasoning-heavy families remain excluded by default. Explicit no-inference gateway failures are rejected locally, rather than marked as uncertain inference. Previous unknown ledger entries remain preserved. FreeRide failure messages cannot establish which account restriction exists without this readiness check.
 
 The council dashboard now uses separate allowance/reset/schedule cards, full-width mobile inputs, a primary start button, and collapsible advanced controls/history. Daily allowance inputs initially load the saved value; premium controls appear only in explicit paid mode. Expand **Allowance, schedule & advanced controls** for one-off runs and limits.
+
+## Catalog works, but inference returns 503
+
+The gateway now uses separate timeouts: 10 seconds for catalog access and 45 seconds for upstream inference. Catalog results are cached for 60 seconds; Penguin allows 90 seconds for the managed request. An earlier shared 10-second timeout could cut off inference. True timeouts/5xx still retain uncertain reservations and never trigger an automatic resend.
+
+FreeRide can wrap explicit upstream failures in HTTP503. The adapter now preserves sanitized 400/401/403/404/429 rejection categories rather than reporting all of them as uncertain 503 outcomes. Raw provider bodies and keys are never shown. If the new message identifies parameters, authentication, privacy, model availability or quota, follow that specific cause; a genuine upstream 5xx still requires waiting/checking provider status.
+
+On a user-confirmed Groq free plan, the native free-catalog GPT-OSS 20B/120B IDs are now eligible with `reasoning_effort=low`. Compound agents remain excluded, the context gate and output cap remain enforced, and there is no OpenAI API billing or paid fallback. Low reasoning does not eliminate all reasoning tokens, so truncation is still possible. Unknown/new model IDs are not blindly accepted. Restart the old gateway after pulling/rebuilding; no reinstall or allowance reset is required.
