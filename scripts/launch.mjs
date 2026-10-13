@@ -12,12 +12,12 @@ function stop(code=0){
   for(const child of children){
     if(child.exitCode!==null)continue;
     if(process.platform==='win32')spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore'});
-    else child.kill('SIGTERM');
+    else { try { process.kill(-child.pid,'SIGTERM'); } catch { child.kill('SIGTERM'); } }
   }
   process.exitCode=code;
 }
 function start(args){
-  const child=spawn(process.execPath,args,{stdio:'inherit'});children.push(child);
+  const child=spawn(process.execPath,args,{stdio:'inherit',detached:process.platform!=='win32'});children.push(child);
   child.on('error',()=>{console.error('Penguin service could not start.');stop(1);});
   child.on('exit',code=>{if(!stopping){console.error('A Penguin service stopped. Restart with npm run launch.');stop(code||1);}});
   return child;
