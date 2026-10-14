@@ -1,13 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import type { TeamRun, TeamSettings } from "@/lib/server/agent-team";
+import type { TeamRun, TeamSettings, RouteComparison } from "@/lib/server/agent-team";
 type Budget = { provider: string; model: string; day: string; dailyUsd: number; runUsd: number; usedUsd: number; reservedUsd: number; calls: number; dailyCalls: number; inputTokens: number; outputTokens: number; cachedTokens: number; unknownCalls: number; maxOutput: number; remainingCalls: number; resetsAt: string };
-type TeamState = { budget: Budget; runs: TeamRun[]; settings: TeamSettings; contexts: { key: string; label: string }[] };
+type TeamState = { comparisons: RouteComparison[]; comparisonRoutes: {id:string;name:string}[]; budget: Budget; runs: TeamRun[]; settings: TeamSettings; contexts: { key: string; label: string }[] };
 export function AgentTeamPanel({ contextKey }: { contextKey: string }) {
   const [state, setState] = useState<TeamState | null>(null), [question, setQuestion] = useState("Review the current evidence and propose our next bounded experiment.");
   const [busy, setBusy] = useState(false), [message, setMessage] = useState("Run strategy research, then unlock private settings in Connections to assemble your team.");
   const [interval, setIntervalMinutes] = useState(240), [escalation, setEscalation] = useState(false);
   const loaded = useRef(false);
+  const [testRoutes,setTestRoutes] = useState(["free_cloud","groq_free","openrouter_free","freeride","nine_router"]);
   const [dailyCalls, setDailyCalls] = useState(30);
   const [selectedContext, setSelectedContext] = useState(contextKey);
   useEffect(() => {
@@ -20,7 +21,7 @@ export function AgentTeamPanel({ contextKey }: { contextKey: string }) {
   async function action(payload?: Record<string, unknown>) {
     setBusy(true);
     try {
-      if (payload) { const r = await fetch("/api/terminal/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await r.json(); if (!r.ok) throw new Error(data.error); setMessage(data.message || (data.status ? `${data.cacheHit ? "Cached briefing" : "Team run"}: ${data.status}. ${data.error || (data.note ? "Saved to your Obsidian vault." : "")}` : "Team schedule saved. Automatic runs use the standard model.")); }
+      if (payload) { const r = await fetch("/api/terminal/team", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const data = await r.json(); if (!r.ok) throw new Error(data.error); setMessage(data.results ? "Route comparison complete. Review each response below; selecting a router is your choice." : data.message || (data.status ? `${data.cacheHit ? "Cached briefing" : "Team run"}: ${data.status}. ${data.error || (data.note ? "Saved to your Obsidian vault." : "")}` : "Team schedule saved. Automatic runs use the standard model.")); }
       await refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Team request failed"); }
     finally { setBusy(false); }
@@ -40,6 +41,13 @@ export function AgentTeamPanel({ contextKey }: { contextKey: string }) {
       <div className="ot-team-schedule"><label>Review interval · minutes<input type="number" min={60} max={10080} value={interval} onChange={e => setIntervalMinutes(Number(e.target.value))} /></label>{state?.budget.provider === "openai" && <label><input type="checkbox" checked={escalation} onChange={e => setEscalation(e.target.checked)} /> Allow explicit premium risk review</label>}<button className="ot-secondary" disabled={busy || !evidenceReady} onClick={() => void action({ action: "settings", contextKey: selectedContext, intervalMinutes: interval, allowEscalation: state?.budget.provider === "openai" && escalation, enabled: true })}>{state?.settings.enabled ? "Apply review interval" : "Enable scheduled team"}</button></div>
       <div className="ot-desk-actions"><button className="ot-secondary" disabled={busy} onClick={() => void action()}>Load budget &amp; history</button><button className="ot-secondary" disabled={busy || !evidenceReady} onClick={() => void action({ action: "run", contextKey: selectedContext, question })}>Convene research team</button>{state?.budget.provider === "openai" && <button className="ot-secondary" disabled={busy || !state?.settings.allowEscalation} onClick={() => void action({ action: "run", contextKey: selectedContext, question, escalation: true })}>Escalate risk review</button>}</div>
       {state && <p className="ot-methodology">{state.budget.provider} · {state.budget.maxOutput} output tokens/call · {state.budget.inputTokens.toLocaleString()} input / {state.budget.outputTokens.toLocaleString()} output tokens · {state.budget.unknownCalls} uncertain calls · ${state.budget.reservedUsd.toFixed(4)} reserved. Free mode has no paid fallback. Shared accounting and six-hour evidence caching remain active. Agents have no order or deployment tools.</p>}
+    </details>
+    <details className="penguin-council-settings"><summary>Compare free AI routes</summary>
+      <p>One identical small question per selected route, capped at 512 output tokens. Each route is tested once; FreeRide can make two upstream attempts and 9Router manages its own upstream attempts. Tests share the daily allowance. They do not place trades or change your active router.</p>
+      <div className="ot-desk-actions">{state?.comparisonRoutes.map(route=><label key={route.id}><input type="checkbox" checked={testRoutes.includes(route.id)} onChange={e=>setTestRoutes(current=>e.target.checked?[...current,route.id]:current.filter(r=>r!==route.id))} /> {route.name}</label>)}</div>
+      <button className="ot-primary" disabled={busy||!state||!testRoutes.length} onClick={()=>void action({action:"compare",routes:testRoutes})}>{busy?"Testing routes…":"Test selected routes live"}</button>
+      <p>Provider directories: <a href="https://github.com/nejib1/Free-LLM" target="_blank" rel="noreferrer">Free-LLM</a> · <a href="https://github.com/zebbern/no-cost-ai" target="_blank" rel="noreferrer">no-cost-ai</a>. These list services; they do not supply an inference API. See <a href="https://github.com/Devologger/129381293iewq/blob/main/docs/AI-ROUTE-COMPARISON.md" target="_blank" rel="noreferrer">router setup guide</a>.</p>
+      {state?.comparisons.map(test=><div key={test.id} className="ot-team-run"><h3>{new Date(test.created).toLocaleString()}</h3><p>Question: {test.prompt}</p>{test.results.map(row=><article key={row.provider}><h3>{row.provider} · {row.status}</h3><p>{(row.latencyMs/1000).toFixed(1)}s including catalog checks · {row.calls} app calls · {row.inputTokens} input / {row.outputTokens} output tokens · {row.unknownCalls} uncertain</p>{row.error&&<p>{row.error}</p>}{row.answer&&<><p>{row.model} · Arithmetic spot check: {row.checkPassed?"expected numbers present":"review answer"}. This does not assess trading skill.</p><p>{row.answer}</p><button className="ot-secondary" disabled={busy} onClick={()=>void action({action:"routing",provider:row.provider})}>Use {row.provider} for council</button></>}</article>)}</div>)}
     </details>
     <div className="penguin-council-history"><h3>Recent briefings</h3>{state?.runs.length === 0 && <p>Your first completed briefing will appear here.</p>}{state?.runs.map(run => <details className="ot-team-run" key={run.id}><summary><span className={`penguin-run-badge ${run.status.toLowerCase()}`}>{run.status}</span><span>{new Date(run.created).toLocaleString()}</span><span>${run.costUsd.toFixed(5)} · {run.provider || "older run"}</span></summary>{run.error && <p>{run.error}</p>}{run.messages.map(m => <article key={m.role}><h3>{m.name} <small>{m.model}</small></h3><p>{m.text}</p></article>)}{run.note && <p>Vault: Research/&lt;workspace&gt;/{run.note}</p>}</details>)}</div>
   </section>;

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type Setting = { name: string; configured: boolean; managedByEnvironment: boolean };
 type Settings = { adminConfigured: boolean; unlocked: boolean; credentials: Setting[] };
-const LABELS: Record<string, string> = { DISCORD_WEBHOOK_URL:"Discord channel webhook · outgoing alerts", JARVIS_TTS_APP_KEY:"Remote Jarvis TTS app key · optional", GROQ_API_KEY: "Groq free-tier key · direct free cloud / FreeRide", TEAM_REMOTE_KEY: "OpenRouter / free-provider API key", TRADE_AI_KEY: "OpenAI key · optional paid mode", DISCORD_PUBLIC_KEY: "Discord application Public Key", BINANCE_DEMO_API_KEY: "Binance demo API key", BINANCE_DEMO_API_SECRET: "Binance demo API secret" };
+const LABELS: Record<string, string> = { NINE_ROUTER_KEY:"9Router restricted endpoint key · optional", DISCORD_WEBHOOK_URL:"Discord channel webhook · outgoing alerts", JARVIS_TTS_APP_KEY:"Remote Jarvis TTS app key · optional", GROQ_API_KEY: "Groq free-tier key · direct free cloud / FreeRide", TEAM_REMOTE_KEY: "OpenRouter / free-provider API key", TRADE_AI_KEY: "OpenAI key · optional paid mode", DISCORD_PUBLIC_KEY: "Discord application Public Key", BINANCE_DEMO_API_KEY: "Binance demo API key", BINANCE_DEMO_API_SECRET: "Binance demo API secret" };
 export function IntegrationSettings({ onNotice, onDiscordConfigured }: { onNotice: (message: string) => void; onDiscordConfigured: (configured: boolean) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [password, setPassword] = useState("");

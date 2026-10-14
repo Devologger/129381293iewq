@@ -1,10 +1,10 @@
 import {saveAiRouting} from '@/lib/server/free-cloud';
-import { saveDailyCallLimit, diagnoseProvider, budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
+import { compareRoutes, routeComparisons, COMPARISON_ROUTES, saveDailyCallLimit, diagnoseProvider, budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 export const runtime = "nodejs";
 export async function GET(request: Request) {
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
-  try { const id = workspaceSession(request).id; return Response.json({ budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES }, { headers: { "Cache-Control": "no-store" } }); }
+  try { const id = workspaceSession(request).id; return Response.json({ budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES, comparisons: routeComparisons(id), comparisonRoutes: COMPARISON_ROUTES }, { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
 }
 export async function POST(request: Request) {
@@ -13,6 +13,7 @@ export async function POST(request: Request) {
   try {
     const text = await request.text(); if (text.length > 5000) throw new Error("Payload too large");
     const data = JSON.parse(text), id = workspaceSession(request).id;
+    if (data.action === "compare") return Response.json(await compareRoutes(id, data.routes));
     if (data.action === "routing") return Response.json({provider:saveAiRouting(data.provider),message:"Free router saved. Existing encrypted keys are reused; no paid fallback or accounting reset."});
     if (data.action === "budget") return Response.json({ budget: saveDailyCallLimit(data.dailyCalls), message: "Daily allowance saved. Existing usage and uncertain reservations are preserved." });
     if (data.action === "enable") {

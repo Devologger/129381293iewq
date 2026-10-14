@@ -10,7 +10,7 @@ export function selectedAiProvider(){
  // Old .env files should not keep users on the compatibility gateway after upgrading.
  return configured==='freeride'&&process.env.TEAM_KEEP_LEGACY_GATEWAY!=='1'?'free_cloud':configured;
 }
-export function saveAiRouting(provider:string){if(!['free_cloud','freeride','openrouter_free'].includes(provider))throw new Error('Choose a supported free router');db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');db().prepare('INSERT INTO ai_routing VALUES (1,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider').run(provider);return provider;}
+export function saveAiRouting(provider:string){if(!['free_cloud','freeride','openrouter_free','groq_free','nine_router'].includes(provider))throw new Error('Choose a supported free router');db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');db().prepare('INSERT INTO ai_routing VALUES (1,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider').run(provider);return provider;}
 export async function freeCloudRoutes(fetcher:typeof fetch=fetch):Promise<FreeRoute[]>{
  const providers=[{provider:'groq' as const,key:process.env.FREERIDE_GROQ_FREE_CONFIRMED==='1'?credential('GROQ_API_KEY'):null,base:'https://api.groq.com/openai/v1'},{provider:'openrouter' as const,key:credential('TEAM_REMOTE_KEY'),base:'https://openrouter.ai/api/v1'}];
  const lists=await Promise.allSettled(providers.filter(p=>p.key).map(async p=>{
