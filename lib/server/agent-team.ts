@@ -1,3 +1,4 @@
+import {councilResearch,rateResetSeconds} from './council-evidence.ts';
 import {notify as notifyDiscord} from './alerts.ts';
 import {selectedAiProvider, freeCloudRoutes, coolFreeRoute} from './free-cloud.ts';
 import { FREERIDE_URL, freerideToken, providerFailure } from "./freeride.ts";
@@ -170,14 +171,21 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
     try { response = await fetcher(remote?.endpoint || "https://api.openai.com/v1/responses", { method: "POST", headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), "Content-Type": "application/json" }, signal: AbortSignal.timeout(config.provider === "freeride" ? 90000 : 60000), body: JSON.stringify(free ? { model, stream: false, max_tokens: config.maxOutput, ...(cloudRoute?.parameters || {}), messages: [{ role: "system", content: instructions }, { role: "user", content: input }] } : { model, store: false, max_output_tokens: config.maxOutput, instructions, input }) }); }
     catch { if(cloudRoute) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60); db().prepare("UPDATE ai_calls SET status='UNKNOWN' WHERE id=?").run(callId); throw new Error("Provider outcome uncertain; budget reservation retained and no retry issued"); }
     if (!response.ok) {
-      if(cloudRoute) attemptedRoutes.push(`${cloudRoute.provider}/${cloudRoute.model}: HTTP ${response.status}`);
+      if(cloudRoute) attemptedRoutes.push(`${cloudRoute.provider}/${cloudRoute.model}: HTTP ${response.status}${response.status===429&&rateResetSeconds(response.headers)!==undefined ? ` (reported reset ${rateResetSeconds(response.headers)}s)` : ""}`);
       if(cloudRoute&&response.status>=500) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60);
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.
       const rejected = [400, 401, 403, 404, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
       db().prepare("UPDATE ai_calls SET status=? WHERE id=?").run(rejected ? "REJECTED" : "UNKNOWN", callId);
       if (cloudRoute && remote && [401,403,404,429].includes(response.status) && attempt === 0) {
-        const previous = cloudRoute; coolFreeRoute(previous);
-        const next = cloudRoutes.find(r=>r.identity!==previous.identity&&(response.status===404||r.provider!==previous.provider));
+        const previous = cloudRoute;
+        const reset = response.status===429 ? rateResetSeconds(response.headers) : undefined;
+        if(response.status===429&&previous.provider==='groq'&&reset!==undefined&&reset<=30){
+          const delay=Math.max(1,reset);coolFreeRoute(previous,delay);
+          await new Promise(resolve=>setTimeout(resolve,delay*1000+100));
+          continue; // Second and final attempt, only after an explicit rate-limit rejection.
+        }
+        coolFreeRoute(previous,response.status===429?Math.min(86400,Math.max(60,reset||60)):900);
+        const next = cloudRoutes.find(r=>r.identity!==previous.identity&&(response.status===404||response.status===429||r.provider!==previous.provider));
         if(next){cloudRoute=next;key=next.key;model=next.model;remote.endpoint=next.endpoint;remote.identity=next.identity;continue;}
       }
       if (!cloudRoute && response.status === 429 && attempt === 0) {
@@ -228,10 +236,10 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   if (!bot?.research) throw new Error("Run strategy research for this market first");
   if (escalation && !teamSettings(workspaceId).allowEscalation) throw new Error("Enable reviewed escalation in team settings first");
   const demoOrders = demo ? demoJournal(workspaceId).filter(o => o.symbol === demo.symbol && o.status !== "DRAFT").slice(0, 10).map(o => ({ symbol: o.symbol, side: o.side, quantity: o.quantity, status: o.status, executedQuantity: o.exchange?.executedQty, averagePrice: o.exchange?.avgPrice, reduceOnly: o.reduceOnly, created: o.created })) : undefined;
-  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: bot.research, paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
+  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: councilResearch(bot.research), paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
   const memory = vaultMemory(workspaceId);
   const config = budgetConfig();
-  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 6, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 7, evidence, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
   const cached = db().prepare("SELECT state FROM team_runs WHERE workspace_id=? AND cache_key=? AND created>? ORDER BY created DESC").all(workspaceId, cacheKey, Date.now() - 21600000) as { state: string }[];
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };
@@ -242,7 +250,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   const allowance = budgetStatus();
   if (allowance.remainingCalls < TEAM_ROLES.length) throw new Error(`Council needs 3 calls; ${allowance.remainingCalls} remain (${allowance.calls}/${allowance.dailyCalls} used). Resets ${allowance.resetsAt}. Increase Daily call allowance or wait; no provider request was made.`);
     for (const role of TEAM_ROLES) {
-      const input = JSON.stringify({ ownerQuestion: question, evidence, obsidianMemory: memory, teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 5000) })) });
+      const input = JSON.stringify({ ownerQuestion: question, evidence, obsidianMemory: memory.map(m=>({...m,text:m.text.slice(0,1200),truncated:m.text.length>1200})), teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 1800) })) });
       const message = await ask(workspaceId, run, role, input, fetcher, escalation && role.id === "risk");
       run.messages.push(message); run.costUsd += message.costUsd; persist(workspaceId, cacheKey, run);
     }
