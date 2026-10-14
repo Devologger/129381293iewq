@@ -1,7 +1,7 @@
 import {nineRouterRoutes, NINE_ROUTER_URL} from './nine-router.ts';
 import {councilResearch,councilFacts,rateResetSeconds} from './council-evidence.ts';
 import {notify as notifyDiscord} from './alerts.ts';
-import {selectedAiProvider, freeCloudRoutes, coolFreeRoute} from './free-cloud.ts';
+import {selectedAiProvider, freeCloudRoutes, inspectFreeCloud, coolFreeRoute} from './free-cloud.ts';
 import { FREERIDE_URL, freerideToken, providerFailure } from "./freeride.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
@@ -58,8 +58,12 @@ export async function selectFreeModel(fetcher: typeof fetch, preferred = "auto-f
 export async function diagnoseProvider(fetcher: typeof fetch = fetch, provider = selectedAiProvider()) {
   const config = budgetConfig(provider);
   if (config.provider === "nine_router") { const routes = await nineRouterRoutes(fetcher); return {message:`9Router: ${routes.length} exact routes match verified free catalogs. No inference request made. Gateway upstream attempts are managed by 9Router, not Penguin.`}; }
-  if (config.provider === "groq_free") { const routes = (await freeCloudRoutes(fetcher)).filter(r=>r.provider==="groq"); if(!routes.length) throw new Error("No verified Groq free route available"); return {message:`Groq: ${routes.length} free-plan routes. No inference request made.`}; }
-  if (config.provider === "free_cloud") { const routes = await freeCloudRoutes(fetcher); return {message: `Direct free cloud ready: ${routes.length} verified catalog routes across ${[...new Set(routes.map(r=>r.provider))].join(", ")}. Two inference attempts maximum; no paid fallback. Catalog access does not prove inference success.`}; }
+  if (["free_cloud","groq_free"].includes(config.provider)) {
+    const {routes,checks}=await inspectFreeCloud(fetcher,config.provider === "groq_free" ? "groq" : undefined);
+    const summary=checks.map(c=>`${c.provider === "groq" ? "Groq" : "OpenRouter"}: ${c.message}`).join(" ");
+    if(!routes.length) throw new Error(`No verified free cloud route available. ${summary} No inference was made.`);
+    return {message:`${config.provider === "groq_free" ? "Groq direct" : "Direct free cloud"}: ${routes.length} available routes. ${summary} No inference request made.`,checks};
+  }
   if (config.provider === "freeride") {
     try {
       const response = await fetcher(FREERIDE_URL.replace(/\/v1$/, "") + "/penguin/capabilities", { headers: { Authorization: `Bearer ${freerideToken()}` }, signal: AbortSignal.timeout(5000) });
@@ -151,7 +155,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
   const config = budgetConfig(override?.provider);
   if (override?.probe) config.maxOutput = 512;
   const free = config.provider !== "openai", remote = free ? remoteProvider(config.provider) : undefined;
-  const cloudRoutes = config.provider === "nine_router" ? await nineRouterRoutes(fetcher) : ["free_cloud", "groq_free"].includes(config.provider) ? (await freeCloudRoutes(fetcher)).filter(r=>config.provider!=="groq_free"||r.provider==="groq") : [];
+  const cloudRoutes = config.provider === "nine_router" ? await nineRouterRoutes(fetcher) : ["free_cloud", "groq_free"].includes(config.provider) ? await freeCloudRoutes(fetcher,config.provider==="groq_free"?"groq":undefined) : [];
   if (config.provider === "groq_free" && !cloudRoutes.length) throw new Error("No verified Groq free route available; check key and free-plan confirmation.");
   let cloudRoute = cloudRoutes[0];
   let key = config.provider === "freeride" ? freerideToken() : credential(free ? "TEAM_REMOTE_KEY" : "TRADE_AI_KEY");

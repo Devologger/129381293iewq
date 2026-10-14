@@ -98,3 +98,13 @@ Free-LLM: https://github.com/nejib1/Free-LLM
 no-cost-ai: https://github.com/zebbern/no-cost-ai
 
 Those directories may help find other services later. Their listed providers are not all installed or enabled by these five profiles; many require separate accounts, plan verification, payment cards or different API adapters.
+
+## When FreeRide succeeds but direct routes say NOT_RUN
+
+Choose **Use freeride for council** on the completed result to use the working gateway. A completed comparison proves that small inference worked, not that a full council review or trading strategy is validated.
+
+Stored-key status is not an inference test. Direct route diagnostics now explain each provider separately: key missing in this app process, Groq free-plan confirmation not loaded, catalog HTTP rejection, network failure, no eligible models, cooldown wait, or a billing block. Groq-only tests inspect only Groq. Metadata-only checks never consume an app inference call.
+
+If the diagnostic says Groq confirmation is off, verify `FREERIDE_GROQ_FREE_CONFIRMED=1` appears once in the `.env.local` beside this project's `package.json`; stop and restart Penguin from that folder. A FreeRide terminal started earlier may have loaded different settings. If it says a key is missing, check that both terminals use the same project and `TERMINAL_DATA_DIR`; preserve `.runtime`, do not delete/recreate it. A cooldown message gives the wait; switching to another router using the same account does not reset the provider quota.
+
+An OpenRouter inference HTTP 403 means that request was rejected by OpenRouter. Check account/key/model access and compatible privacy restrictions in its console; the app cannot determine or override the account policy from a generic 403. There is no need to disable privacy settings or enable paid models to keep using an already working Groq/FreeRide route. An unconfigured 9Router remains optional; it does not block the council on another selected router.
