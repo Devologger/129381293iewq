@@ -1,7 +1,6 @@
 import {runAllAccounts} from "./accounts.ts";
-import {candidateOutcomeVeto} from './trade-feedback.ts';
 import {notify as notifyDiscord} from './alerts.ts';
-import { demoCandles, openPaper, closePaper, matchesFeed, type Feed, type Research } from "../terminal-engine.ts";
+import { demoCandles, closePaper, type Feed, type Research } from "../terminal-engine.ts";
 import { marketResponse } from "./market.ts";
 import { runResearch } from "./research.ts";
 import { saveVaultNote } from "./vault.ts";
@@ -23,7 +22,7 @@ export async function getFeed(context: Context): Promise<Feed> {
   return { ...context, candles: body.candles, fetchedAt: Date.now() };
 }
 export async function tickWorkspace(id: string, feedProvider = getFeed, researcher = runResearch) {
-  const initial = readWorkspace(id); const feeds = new Map<string, Feed>(); const errors: string[] = [];
+  const initial = updateWorkspace(id,ws=>ws.bots.some(b=>b.enabled||b.learning)?{...ws,bots:ws.bots.map(b=>({...b,scanning:Boolean(b.scanning||b.enabled||b.learning),enabled:false,learning:false}))}:ws); const feeds = new Map<string, Feed>(); const errors: string[] = [];
   const load = async (context: Context) => { const key = contextKey(context); if (!feeds.has(key)) feeds.set(key, await feedProvider(context)); return feeds.get(key)!; };
   for (const p of initial.portfolio.positions) {
     try {
@@ -37,21 +36,12 @@ export async function tickWorkspace(id: string, feedProvider = getFeed, research
     try {
       const f = await load(bot); const bar = f.candles.at(-1)!;
       if (bot.lastBar >= bar.time && bot.research) continue;
-      let report: Research = bot.scanning || bot.learning || !bot.research ? await researcher(f.candles, bot.tolerance, bot.learning && !initial.portfolio.paused) : bot.research;
-      if(bot.learning && report.candidate!==null && report.active_tolerance!==bot.tolerance){
-        const veto=candidateOutcomeVeto(id,bot,report.active_tolerance);
-        if(veto){const baseline=await researcher(f.candles,bot.tolerance,false);report={...baseline,candidate:null,active_tolerance:bot.tolerance,decision:'veto_recorded_paper_losses',methodology:baseline.methodology+' '+veto.reason};}
-      }
+      const report: Research = await researcher(f.candles, bot.tolerance, false);
       const updatedWorkspace = updateWorkspace(id, ws => {
         const current = ws.bots.find(b => b.key === bot.key);
         if (!current || ((ws.portfolio.paused || (!current.enabled && !current.learning)) && !current.scanning) || (current.lastBar >= bar.time && current.research)) return ws;
-        const level = report.snapshot.display_levels.at(-1)?.price;
-        let portfolio = ws.portfolio;
-        if (!ws.portfolio.paused && current.enabled && !current.feedbackPaused && current.lastBar > 0 && bar.time > current.lastBar && level && f.candles.at(-2)!.close < level && bar.close >= level && !portfolio.positions.some(p => matchesFeed(p, f)) && portfolio.cash >= 100) {
-          try { portfolio = openPaper(portfolio, f, "long", Math.min(500, portfolio.cash * .1),{origin:"automation",tolerance:current.learning?report.active_tolerance:current.tolerance,researchAsOf:report.as_of}); }
-          catch (error) { errors.push(error instanceof Error ? error.message : "Paper risk limit vetoed entry"); }
-        }
-        return { ...ws, portfolio, bots: ws.bots.map(b => b.key === bot.key ? { ...b, lastBar: bar.time, research: report, tolerance: current.learning && !ws.portfolio.paused ? report.active_tolerance : current.tolerance, error: null, updatedAt: new Date().toISOString() } : b) };
+        const portfolio = ws.portfolio;
+        return { ...ws, portfolio, bots: ws.bots.map(b => b.key === bot.key ? { ...b, enabled:false, lastBar: bar.time, research: report, tolerance: current.tolerance, error: null, updatedAt: new Date().toISOString() } : b) };
       });
       if (updatedWorkspace.bots.find(b => b.key === bot.key)?.lastBar === bar.time) saveVaultNote(id, f, report, updatedWorkspace.portfolio);
     } catch (error) { const message = error instanceof Error ? error.message : "Paper bot failed"; errors.push(message); updateWorkspace(id, ws => ({ ...ws, bots: ws.bots.map(b => b.key === bot.key ? { ...b, error: message } : b) })); }

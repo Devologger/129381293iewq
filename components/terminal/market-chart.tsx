@@ -13,11 +13,12 @@ export function MarketChart({candles,levels=[],compact=false,liveCandle}:{candle
  },[compact]);
  useEffect(()=>{
   const series=seriesRef.current,volume=volumeRef.current,chart=chartRef.current;if(!series||!volume||!chart||!candles.length)return;
-  const data=candles.map(c=>({...c}));if(liveCandle&&liveCandle.time>=data.at(-1)!.time){if(liveCandle.time===data.at(-1)!.time)data[data.length-1]=liveCandle;else data.push(liveCandle);}
+  const data=candles;
   series.applyOptions({priceFormat:{type:'price',precision:data.at(-1)!.close<1?4:2,minMove:data.at(-1)!.close<1?.0001:.01}});
   series.setData(data.map(c=>({...c,time:c.time as UTCTimestamp})));volume.setData(data.map(c=>({time:c.time as UTCTimestamp,value:c.volume,color:c.close>=c.open?'#80bda728':'#c97b7928'})));
   if(!positioned.current){chart.timeScale().setVisibleLogicalRange({from:data.length-(compact?45:100),to:data.length+3});positioned.current=true;}
- },[candles,liveCandle,compact]);
+ },[candles,compact]);
+ useEffect(()=>{const series=seriesRef.current,volume=volumeRef.current;if(!series||!volume||!liveCandle||!candles.length||liveCandle.time<candles.at(-1)!.time)return;series.update({...liveCandle,time:liveCandle.time as UTCTimestamp});volume.update({time:liveCandle.time as UTCTimestamp,value:liveCandle.volume,color:liveCandle.close>=liveCandle.open?"#80bda728":"#c97b7928"});},[liveCandle,candles,compact]);
  useEffect(()=>{const series=seriesRef.current;if(!series)return;for(const line of lines.current)series.removePriceLine(line);lines.current=levels.slice(-3).map(l=>series.createPriceLine({price:l.price,color:'#d3ad65',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:l.label}));},[levels,compact]);
  return <div ref={container} className="ot-chart-canvas" style={{height:compact?190:360}} role="img" aria-label="Interactive candlestick and volume chart. Drag to pan; scroll to zoom."/>;
 }

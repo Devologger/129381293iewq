@@ -1,3 +1,5 @@
+> Current workflow: [Demo cockpit guide](DEMO-COCKPIT.md). Paper automation and free-mode app call caps described in older sections below are retired. Existing records are preserved. Charts now support exchange WebSockets; private demo account values still use polling.
+
 # Remote free AI, research strategies and Obsidian memory
 
 ## Decision from the four suggested projects

@@ -1,3 +1,4 @@
+import {demoProtections,hasUnresolvedProtection,hasOutstandingProtection,protectionPlan,protectDemo,reconcileProtections,type ProtectionPlan,protectionReady} from './demo-protection.ts';
 import {vaultDirectory} from "./account-context.ts";
 import { randomUUID } from "node:crypto";
 import { createHmac } from "node:crypto";
@@ -11,7 +12,7 @@ const ORDER_STATUSES = ["NEW", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECT
 type Params = Record<string, string>;
 type Position = { symbol: string; positionAmt: string; markPrice: string; entryPrice: string; unRealizedProfit: string; positionSide: string };
 type ExchangeOrder = { orderId: number; clientOrderId: string; symbol: string; status: string; executedQty: string; avgPrice: string; side: string; origQty: string; type: string };
-export type DemoOrder = { id: string; workspaceId: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT"; quantity: string; price?: string; reduceOnly: boolean; notional: number; requestedNotional: number; created: number; expires: number; status: string; exchange?: ExchangeOrder; message?: string };
+export type DemoOrder = { id: string; workspaceId: string; symbol: string; side: "BUY" | "SELL"; type: "MARKET" | "LIMIT"; quantity: string; price?: string; reduceOnly: boolean; notional: number; requestedNotional: number; created: number; expires: number; status: string; exchange?: ExchangeOrder; message?: string; protection?:ProtectionPlan };
 type Filter = { filterType: string; minQty?: string; maxQty?: string; stepSize?: string; tickSize?: string; minPrice?: string; maxPrice?: string; notional?: string };
 type SymbolInfo = { symbol: string; status: string; contractType: string; quoteAsset: string; filters: Filter[] };
 class DemoRejection extends Error { status: number; code: number; constructor(status: number, code: number) { super(`Binance demo request failed (HTTP ${status}, code ${code || "unknown"})`); this.status = status; this.code = code; } }
@@ -73,7 +74,10 @@ async function account(fetcher: typeof fetch) {
   for (const order of orders) if (!/^[A-Z0-9]{2,12}USDT$/.test(order.symbol) || !Number.isFinite(Number(order.origQty)) || Number(order.origQty) < 0 || !Number.isFinite(Number(order.executedQty)) || Number(order.executedQty) < 0) throw new Error("Invalid demo pending order response");
   return { positions: positions.filter(p => Number(p.positionAmt) !== 0), openOrders: orders };
 }
-export async function demoAccount(workspaceId: string, fetcher: typeof fetch = fetch) { return { environment: "BINANCE USD-M DEMO", ...(await account(fetcher)), journal: demoJournal(workspaceId), limits: { maxOrderUsdt: maxOrder(), maxExposureUsdt: maxExposure() } }; }
+export async function demoAccount(workspaceId: string, fetcher: typeof fetch = fetch) {
+  const current=await account(fetcher);
+  return {environment:"BINANCE USD-M DEMO",...current,protections:demoProtections(workspaceId),journal:demoJournal(workspaceId),limits:{maxOrderUsdt:maxOrder(),maxExposureUsdt:maxExposure()}};
+}
 export async function demoClosedCandles(symbol: string, timeframe: string, fetcher: typeof fetch = fetch) {
   if (!/^[A-Z0-9]{2,12}USDT$/.test(symbol) || !["5m", "15m", "1h", "4h"].includes(timeframe)) throw new Error("Invalid demo candle context");
   const rows = await publicRequest("/fapi/v1/klines", { symbol, interval: timeframe, limit: "500" }, fetcher);
@@ -103,6 +107,9 @@ export async function previewDemo(workspaceId: string, input: { symbol: string; 
     if (Number(price) < Number(filter.minPrice) || Number(price) > Number(filter.maxPrice) || Math.abs(Number(price) / mark - 1) > .1) throw new Error("Limit price must satisfy exchange filters and remain within 10% of the demo mark");
   }
   const reducing = input.reduceOnly === true;
+  if(!reducing && input.type!=="MARKET")throw new Error("New demo entries require MARKET with an attached SL/TP ladder. Existing limit orders can still be reconciled or canceled.");
+  if(!reducing && (current.positions.some(p=>p.symbol===input.symbol)||current.openOrders.some(o=>o.symbol===input.symbol)))throw new Error("Close or reconcile this contract before opening a new protected demo position");
+  if(!reducing && (hasUnresolvedProtection()||hasOutstandingProtection(input.symbol,workspaceId)))throw new Error("Reconcile existing demo protection before another entry");
   let rawQuantity: number;
   if (reducing) {
     const position = current.positions.find(p => p.symbol === input.symbol);
@@ -124,7 +131,10 @@ export async function previewDemo(workspaceId: string, input: { symbol: string; 
     }
     if (!Number.isFinite(pending) || exposure + pending + notional > maxExposure()) throw new Error("Demo account exposure limit exceeded");
   }
-  const order: DemoOrder = { id: `obs-${randomUUID().replaceAll("-", "")}`, workspaceId, symbol: input.symbol, side: input.side as DemoOrder["side"], type: input.type as DemoOrder["type"], quantity, price, reduceOnly: reducing, notional, requestedNotional: reducing ? 0 : Number(input.notional), created: Date.now(), expires: Date.now() + 60000, status: "DRAFT" };
+  const priceFilter=market.filters.find(f=>f.filterType==="PRICE_FILTER");
+  if(!reducing&&!priceFilter?.tickSize)throw new Error("Protection price filters unavailable");
+  const protection=reducing?undefined:protectionPlan(mark,quantity,lot.stepSize,lot.minQty,priceFilter!.tickSize!,input.side);
+  const order: DemoOrder = { id: `obs-${randomUUID().replaceAll("-", "")}`, workspaceId, symbol: input.symbol, side: input.side as DemoOrder["side"], type: input.type as DemoOrder["type"], quantity, price, reduceOnly: reducing, notional, requestedNotional: reducing ? 0 : Number(input.notional), created: Date.now(), expires: Date.now() + 60000, status: "DRAFT", protection };
   return save(order);
 }
 export async function reconcileDemo(workspaceId: string, id: string, fetcher: typeof fetch = fetch) {
@@ -133,7 +143,9 @@ export async function reconcileDemo(workspaceId: string, id: string, fetcher: ty
   try {
     const exchange = await signedRequest("/fapi/v1/order", "GET", { symbol: order.symbol, origClientOrderId: order.id }, fetcher);
     if (exchange.clientOrderId !== order.id || exchange.symbol !== order.symbol || !ORDER_STATUSES.includes(exchange.status)) throw new Error("Demo reconciliation identity/status mismatch");
-    return save({ ...order, status: exchange.status, exchange, message: undefined });
+    const result=save({ ...order, status: exchange.status, exchange, message: undefined });
+    const protection=await protectDemo(result,(path,method,params)=>signedRequest(path,method,params,fetcher));
+    return result.protection&&!protectionReady(protection)?save({...result,message:"Entry acknowledged; SL/TP protection is not fully verified. Inspect Binance demo and reconcile. New entries are blocked."}):result;
   } catch { return save({ ...order, message: "Exchange status unavailable. Do not resubmit; reconcile this client ID again." }); }
 }
 export async function submitDemo(workspaceId: string, id: string, fetcher: typeof fetch = fetch) {
@@ -161,7 +173,9 @@ export async function submitDemo(workspaceId: string, id: string, fetcher: typeo
     if (order.price) { params.price = order.price; params.timeInForce = "GTC"; }
     const exchange = await signedRequest("/fapi/v1/order", "POST", params, fetcher);
     if (exchange.clientOrderId !== order.id || exchange.symbol !== order.symbol || !ORDER_STATUSES.includes(exchange.status)) throw new Error("Unexpected demo acknowledgement");
-    return save({ ...order, status: exchange.status, exchange });
+    const result=save({ ...order, status: exchange.status, exchange });
+    const protection=await protectDemo(result,(path,method,params)=>signedRequest(path,method,params,fetcher));
+    return result.protection&&!protectionReady(protection)?save({...result,message:"Entry acknowledged; SL/TP protection is not fully verified. Inspect Binance demo and reconcile. New entries are blocked."}):result;
   } catch (error) {
     if (error instanceof DemoRejection && error.status >= 400 && error.status < 500 && Number.isFinite(error.code) && ![-1001, -1006, -1007].includes(error.code)) return save({ ...order, status: "REJECTED", message: error.message });
     save({ ...order, status: "UNKNOWN", message: "Submission outcome uncertain; reconciling without retrying the order." });
@@ -175,3 +189,5 @@ export async function cancelDemo(workspaceId: string, id: string, fetcher: typeo
   catch { /* Resolve uncertain cancellation through the authoritative order query. */ }
   return reconcileDemo(workspaceId, id, fetcher);
 }
+
+export async function maintainDemoProtection(workspaceId:string,positions:Position[],fetcher:typeof fetch=fetch){await reconcileProtections(workspaceId,positions,(path,method,params)=>signedRequest(path,method,params,fetcher));}

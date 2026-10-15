@@ -14,7 +14,7 @@ process.env.TERMINAL_DATA_DIR = folder; process.env.TERMINAL_VAULT_DIR = join(fo
 after(() => { db().close(); rmSync(folder, { recursive: true, force: true }); });
 saveCredential("BINANCE_DEMO_API_KEY", "test-demo-key"); saveCredential("BINANCE_DEMO_API_SECRET", "test-demo-secret"); saveCredential("TRADE_AI_KEY", "test-ai-key");
 function workspace() { const id = randomBytes(24).toString("hex"); createWorkspace(id); return id; }
-function demoProvider({ timeout = false, neverFound = false, hedge = false, mark = 100, position = 0 } = {}) {
+function demoProvider({ timeout = false, neverFound = false, hedge = false, mark = 100, position = 0, positionAfterFill=false, rejectProtection=false } = {}) {
   let writes = 0, canceled = false; const orders = new Map();
   const fetcher = async (url, options) => {
     const u = new URL(url); assert.equal(u.hostname, "demo-fapi.binance.com");
@@ -26,10 +26,16 @@ function demoProvider({ timeout = false, neverFound = false, hedge = false, mark
     if (u.pathname.endsWith("/dual")) return Response.json({ dualSidePosition: hedge });
     if (u.pathname.endsWith("/positionRisk")) return Response.json(position ? [{ symbol: "BTCUSDT", positionAmt: String(position), markPrice: String(mark), positionSide: "BOTH", entryPrice: "100", unRealizedProfit: "0" }] : []);
     if (u.pathname.endsWith("/openOrders")) return Response.json([]);
+    if(u.pathname.endsWith('/algoOrder')){
+      const aid=u.searchParams.get('clientAlgoId');
+      if(options.method==='POST'){if(rejectProtection)return Response.json({code:-2021},{status:400});const row={clientAlgoId:aid,symbol:'BTCUSDT',side:u.searchParams.get('side'),workingType:u.searchParams.get('workingType'),positionSide:u.searchParams.get('positionSide'),algoStatus:'NEW',orderType:u.searchParams.get('type'),triggerPrice:u.searchParams.get('triggerPrice'),closePosition:u.searchParams.get('closePosition')==='true',reduceOnly:u.searchParams.get('reduceOnly')==='true',quantity:u.searchParams.get('quantity')};orders.set(aid,row);return Response.json(row);}
+      const row=orders.get(aid);if(!row)return Response.json({code:-2013},{status:400});if(options.method==='DELETE')row.algoStatus='CANCELED';return Response.json(row);
+    }
+
     assert.equal(u.pathname, "/fapi/v1/order");
     const id = u.searchParams.get("newClientOrderId") || u.searchParams.get("origClientOrderId");
-    if (options.method === "POST") { writes++; const row = { clientOrderId: id, symbol: "BTCUSDT", status: u.searchParams.get("type") === "LIMIT" ? "NEW" : "FILLED", orderId: 123, executedQty: u.searchParams.get("quantity") }; orders.set(id, row); if (timeout) throw new Error("connection lost after exchange accepted"); return Response.json(row); }
-    if (options.method === "DELETE") canceled = true;
+    if (options.method === "POST") { writes++;if(positionAfterFill)position=u.searchParams.get("reduceOnly")==="true"?0:Number(u.searchParams.get("quantity")); const row = { clientOrderId: id, symbol: "BTCUSDT", status: u.searchParams.get("type") === "LIMIT" ? "NEW" : "FILLED", orderId: 123, executedQty: u.searchParams.get("quantity") }; orders.set(id, row); if (timeout) throw new Error("connection lost after exchange accepted"); return Response.json(row); }
+    if (options.method === "DELETE") {canceled = true;if(!orders.has(id))orders.set(id,{clientOrderId:id,symbol:"BTCUSDT",status:"NEW"});}
     if (neverFound) return Response.json({ code: -2013 }, { status: 400 });
     const row = orders.get(id); return row ? Response.json({ ...row, status: canceled ? "CANCELED" : row.status }) : Response.json({ code: -2013 }, { status: 400 });
   };
@@ -54,15 +60,17 @@ test("demo filters, exposure, hedge mode and preview expiry veto writes", async 
   await assert.rejects(previewDemo(id, { ...entry, notional: 501 }, provider.fetcher), /cap/);
   await assert.rejects(previewDemo(id, { ...entry, notional: 1 }, provider.fetcher), /minimum/);
   await assert.rejects(previewDemo(id, entry, demoProvider({ hedge: true }).fetcher), /one-way/);
-  await assert.rejects(previewDemo(id, entry, demoProvider({ position: 21 }).fetcher), /exposure/);
+  await assert.rejects(previewDemo(id, entry, demoProvider({ position: 21 }).fetcher), /contract|exposure/);
   const draft = await previewDemo(id, entry, provider.fetcher);
   db().prepare("UPDATE demo_orders SET state=? WHERE id=?").run(JSON.stringify({ ...draft, expires: 1 }), draft.id);
   await assert.rejects(submitDemo(id, draft.id, provider.fetcher), /expired/); assert.equal(provider.writes(), 0);
 });
 test("demo limit cancellation and reduce-only close use authoritative orders", async () => {
-  const id = workspace(), provider = demoProvider(); const draft = await previewDemo(id, { ...entry, type: "LIMIT", price: 99.999 }, provider.fetcher);
-  assert.equal(draft.price, "99.99"); await submitDemo(id, draft.id, provider.fetcher);
-  assert.equal((await cancelDemo(id, draft.id, provider.fetcher)).status, "CANCELED");
+  const id=workspace(),provider=demoProvider();
+  await assert.rejects(previewDemo(id,{...entry,type:'LIMIT',price:99},provider.fetcher),/MARKET.*SL/);
+  const draft=await previewDemo(id,entry,provider.fetcher);
+  db().prepare('UPDATE demo_orders SET state=? WHERE id=?').run(JSON.stringify({...draft,type:'LIMIT',price:'99.99',status:'NEW',protection:undefined}),draft.id);
+  assert.equal((await cancelDemo(id,draft.id,provider.fetcher)).status,'CANCELED');
   const reducing = demoProvider({ position: 2 });
   await assert.rejects(previewDemo(id, { ...entry, reduceOnly: true }, reducing.fetcher), /close/);
   const close = await previewDemo(id, { ...entry, side: "SELL", reduceOnly: true, notional: 0 }, reducing.fetcher);
@@ -144,10 +152,31 @@ test("demo bot baselines before entry, claims new bars once and monitors paused 
   await assert.rejects(configureDemoBot(workspace(),{symbol:"BTCUSDT",timeframe:"15m",enabled:true,notional:100},provider.fetcher),/another workspace/);
   await configureDemoBot(id,{symbol:"BTCUSDT",timeframe:"15m",enabled:false,notional:100},provider.fetcher);
   const protecting=demoProvider({position:2,mark:106});
+  db().prepare("DELETE FROM demo_protections WHERE workspace_id=?").run(id);
+  const prior=demoJournal(id).find(o=>o.id===demoBots(id)[0].lastOrder);db().prepare("UPDATE demo_orders SET state=? WHERE id=?").run(JSON.stringify({...prior,protection:undefined}),prior.id);
   // Reconcile earlier fixture order against the same provider's authoritative ID.
   const original=demoBots(id)[0].lastOrder;
   const fetcher=async(url,options)=>new URL(url).pathname.endsWith("/order") && options.method==="GET" && new URL(url).searchParams.get("origClientOrderId")===original ? Response.json({clientOrderId:original,symbol:"BTCUSDT",status:"FILLED"}) : protecting.fetcher(url,options);
   await tickDemoBot(id,demoBots(id)[0],fetcher,async()=>report);
   assert.equal(protecting.writes(),1); assert.equal(demoBots(id)[0].enabled,false);
   assert.equal(demoJournal(id).find(r=>r.id===demoBots(id)[0].lastOrder).reduceOnly,true);
+});
+
+test('demo Start arms automatic council only after closed-bar evidence, and a provider failure persists a waiting deadline',async()=>{
+  const id=workspace(),provider=demoProvider();await configureDemoBot(id,{symbol:'ETHUSDT',timeframe:'15m',enabled:true,notional:100},provider.fetcher);
+  const {teamSettings}=await import('../lib/server/agent-team.ts');assert.equal(teamSettings(id).enabled,true);assert.equal(teamSettings(id).contextKey,'binance-demo:perpetual:ETHUSDT:15m');
+  // Other test workspaces already have scheduled state; move their deadlines to keep this observation isolated.
+  const settingsRows=db().prepare('SELECT workspace_id,state FROM team_settings').all();for(const row of settingsRows)if(row.workspace_id!==id)db().prepare('UPDATE team_settings SET state=? WHERE workspace_id=?').run(JSON.stringify({...JSON.parse(row.state),nextAt:Date.now()+86400000}),row.workspace_id);
+  let calls=0;const unavailable=async()=>{calls++;return Response.json({},{status:503});};await runScheduledTeams(unavailable);assert.equal(calls,0);assert.match(teamSettings(id).message,/first research/);
+  const bot=demoBots(id)[0];db().prepare('UPDATE demo_bots SET state=? WHERE symbol=?').run(JSON.stringify({...bot,research:{as_of:123,studies:[],active_tolerance:.08,decision:'keep_baseline'}}),'ETHUSDT');
+  await runScheduledTeams(unavailable);assert.equal(calls,1);assert.equal(teamSettings(id).state,'waiting');assert.ok(teamSettings(id).nextAt>Date.now()+3600000);await runScheduledTeams(unavailable);assert.equal(calls,1);
+});
+
+test('a confirmed demo fill with rejected protection halts entries and records a reducing emergency close',async()=>{
+ db().prepare('DELETE FROM demo_bots WHERE symbol=?').run('BTCUSDT');
+ const id=workspace(),provider=demoProvider({positionAfterFill:true,rejectProtection:true}),report={as_of:123,active_tolerance:.08,snapshot:{display_levels:[{price:100}]},studies:[]};
+ const configured=await configureDemoBot(id,{symbol:'BTCUSDT',timeframe:'15m',enabled:true,notional:100},provider.fetcher);await tickDemoBot(id,configured,provider.fetcher,async()=>report);
+ let bot=demoBots(id)[0];db().prepare('UPDATE demo_bots SET state=? WHERE symbol=?').run(JSON.stringify({...bot,lastBar:bot.lastBar-900}),'BTCUSDT');await tickDemoBot(id,demoBots(id)[0],provider.fetcher,async()=>report);
+ bot=demoBots(id)[0];assert.equal(bot.enabled,false);assert.match(bot.error,/unconfirmed/);assert.equal(provider.writes(),2);const close=demoJournal(id).find(o=>o.id===bot.lastOrder);assert.equal(close.reduceOnly,true);assert.equal(close.status,'FILLED');
+ await tickDemoBot(id,bot,provider.fetcher,async()=>report);assert.equal(provider.writes(),2);const {hasOutstandingProtection}=await import('../lib/server/demo-protection.ts');assert.equal(hasOutstandingProtection('BTCUSDT',id),false);
 });

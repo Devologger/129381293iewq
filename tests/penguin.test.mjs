@@ -27,10 +27,10 @@ test('actual gateway path uses private auth, atomic limits, metadata and charge 
  const fetcher=async(url,options)=>{calls++;assert.equal(url,FREERIDE_URL+'/chat/completions');assert.equal(options.headers.Authorization,'Bearer '+freerideToken());assert.equal(JSON.parse(options.body).model,'auto');return Response.json({model:'test:free',_freeride_provider:'openrouter',usage:{prompt_tokens:10,completion_tokens:5,cost:0},choices:[{message:{content:'Research only.'},finish_reason:'stop'}]});};
  assert.equal(freerideToken(),freerideToken());
  const run=await runTeam(workspace(),context,'Gateway team review',false,fetcher);assert.equal(run.status,'COMPLETE');assert.equal(calls,3);assert.equal(run.messages[0].model,'openrouter/test:free');
- const blocked=await runTeam(workspace(),context,'Daily limit',false,fetcher);assert.equal(blocked.status,'FAILED');assert.equal(calls,3);
+ const blocked=await runTeam(workspace(),context,'Daily limit',false,fetcher);assert.equal(blocked.status,'COMPLETE');assert.equal(calls,6);
  process.env.TEAM_DAILY_CALL_LIMIT='9';
  const billed=await runTeam(workspace(),context,'Charge audit',false,async()=>Response.json({usage:{cost:.2}}));assert.equal(billed.status,'FAILED');assert.match(billed.error,/nonzero charge/);
- await runTeam(workspace(),context,'Stop subsequent charged gateway calls',false,fetcher);assert.equal(calls,3);
+ await runTeam(workspace(),context,'Stop subsequent charged gateway calls',false,fetcher);assert.equal(calls,6);
  db().prepare('DELETE FROM provider_blocks').run();delete process.env.TEAM_AI_PROVIDER;delete process.env.TEAM_DAILY_CALL_LIMIT;
 });
 test('gateway diagnostics reject unsafe capabilities and require no inference call',async()=>{

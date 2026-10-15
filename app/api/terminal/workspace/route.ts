@@ -17,6 +17,7 @@ async function handlePOST(request: Request) {
     const session = workspaceSession(request); const text = await request.text();
     if (text.length > 20000) return Response.json({ error: "Payload too large" }, { status: 413 });
     const payload = JSON.parse(text);
+    if(payload.action==="open"||payload.action==="candidate"||((payload.action==="automation"||payload.action==="learning")&&payload.enabled===true)||(payload.action==="engine"&&payload.paused===false))throw new Error("Paper automation has been retired. Use Binance demo execution; historical paper positions and journals remain available.");
     if (payload.action === "scan") return Response.json(configureScan(session.id,payload.context,payload.enabled));
     if (payload.action === "link") return Response.json({ code: createLink(session.id), expiresInSeconds: 600 });
     if (payload.action === "open") {

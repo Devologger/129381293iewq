@@ -40,7 +40,7 @@ test('9Router only sends exact verified free targets and accounts gateway reques
   if(url.endsWith('/models'))return catalog();assert.equal(url,NINE_ROUTER_URL+'/chat/completions');assert.equal(opts.headers.Authorization,'Bearer synthetic-restricted-key');const body=JSON.parse(opts.body);assert.equal(body.model,'groq/llama-3.1-8b-instant');posts++;return answer(body.model);
  });assert.equal(posts,1);assert.equal(result.results[0].status,'COMPLETE');assert.equal(result.results[0].calls,1);
 });
-test('exhausted allowance blocks probes before inference and rejects unsupported paid routes',async()=>{
+test('free probes ignore legacy app caps but reject unsupported paid routes',async()=>{
  await assert.rejects(compareRoutes(workspace(),['openai']),/supported free/);
- saveDailyCallLimit(3);let posts=0;const result=await compareRoutes(workspace(),['groq_free'],async(url)=>{if(url.endsWith('/models'))return catalog();posts++;return answer('unexpected');});assert.equal(posts,0);assert.equal(result.results[0].status,'NOT_RUN');assert.match(result.results[0].error,/Daily call limit/);
+ saveDailyCallLimit(3);let posts=0;const result=await compareRoutes(workspace(),['groq_free'],async(url)=>{if(url.endsWith('/models'))return catalog();posts++;return answer('unexpected');});assert.equal(posts,1);assert.equal(result.results[0].status,'COMPLETE');
 });

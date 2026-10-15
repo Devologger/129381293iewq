@@ -18,16 +18,13 @@ test('manual/sample losses and another market do not pause unrelated automation;
  const other=workspace();assert.equal(tradeFeedback(other).paper.trades,0);
 });
 
-test('recorded failures veto a tolerance promotion without changing the baseline geometry',async()=>{
+test('historical loss veto remains queryable after retiring paper learning',async()=>{
  const {candidateOutcomeVeto}=await import('../lib/server/trade-feedback.ts');const id=workspace();for(let i=0;i<5;i++)roundTrip(id);
  const veto=candidateOutcomeVeto(id,context,.08);assert.equal(veto.trades,5);assert.ok(veto.netR<0);assert.equal(candidateOutcomeVeto(id,{...context,symbol:'ETH'},.08),null);assert.equal(candidateOutcomeVeto(id,context,.12),null);
- updateWorkspace(id,ws=>({...ws,bots:ws.bots.map(b=>({...b,tolerance:.12,learning:true}))}));let calls=0;const f=feed();await tickWorkspace(id,async()=>f,async(_candles,tolerance,autoApply)=>{calls++;return {as_of:f.candles.at(-1).time,model:'test',decision:'review_paper_candidate',methodology:'Known research protocol.',candidate:.08,active_tolerance:autoApply ? .08 : tolerance,studies:[],snapshot:{display_levels:[{price:tolerance,label:'test baseline',confirmed:true}]}};});
- const bot=readWorkspace(id).bots[0];assert.equal(calls,2);assert.equal(bot.tolerance,.12);assert.equal(bot.research.active_tolerance,.12);assert.equal(bot.research.snapshot.display_levels[0].price,.12);assert.equal(bot.research.candidate,null);assert.equal(bot.research.decision,'veto_recorded_paper_losses');assert.equal(bot.enabled,false);
 });
-
-test('automatic entry records the tolerance that produced the actual promoted snapshot',async()=>{
+test('retired automation cannot open positions or promote tolerances even on a reclaim signal',async()=>{
  const id=workspace(),f=feed(),last=f.candles.at(-1),level=last.close-1;f.candles=f.candles.map((c,i,all)=>i===all.length-2?{...c,close:level-1,low:Math.min(c.low,level-1),high:Math.max(c.high,level-1)}:c);
  updateWorkspace(id,ws=>({...ws,bots:ws.bots.map(b=>({...b,learning:true,lastBar:last.time-900}))}));
- await tickWorkspace(id,async()=>f,async()=>({as_of:last.time,model:'test',methodology:'Fixture',candidate:.12,active_tolerance:.12,decision:'review_paper_candidate',studies:[],snapshot:{display_levels:[{price:level,label:'promoted',confirmed:true}]}}));
- const result=readWorkspace(id);assert.equal(result.portfolio.positions.length,1);assert.equal(result.bots[0].tolerance,.12);assert.equal(result.portfolio.positions[0].tolerance,.12);assert.equal(result.portfolio.positions[0].origin,'automation');
+ await tickWorkspace(id,async()=>f,async(_candles,_tolerance,apply)=>{assert.equal(apply,false);return {as_of:last.time,model:'test',methodology:'Fixture',candidate:.12,active_tolerance:.08,decision:'review_paper_candidate',studies:[],snapshot:{display_levels:[{price:level,label:'candidate',confirmed:true}]}};});
+ const result=readWorkspace(id);assert.equal(result.portfolio.positions.length,0);assert.equal(result.bots[0].tolerance,.08);assert.equal(result.bots[0].enabled,false);assert.equal(result.bots[0].learning,false);assert.equal(result.bots[0].scanning,true);
 });

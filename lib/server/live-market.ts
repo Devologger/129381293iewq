@@ -1,7 +1,7 @@
 import type {Candle} from '../terminal-engine.ts';
 const durations:Record<string,number>={'5m':300,'15m':900,'1h':3600,'4h':14400};
 const cache=new Map<string,{at:number;data:LiveMarket}>();
-export type LiveMarket={exchange:string;market:string;symbol:string;timeframe:string;price:number;candle:Candle;receivedAt:number;mode:'rest-snapshot';pollSeconds:number};
+export type LiveMarket={exchange:string;market:string;symbol:string;timeframe:string;price:number;candle:Candle;receivedAt:number;mode:'rest-snapshot'|'websocket';pollSeconds:number};
 // Display-only open candles. Never use this endpoint for research or execution.
 export async function liveMarket(query:URLSearchParams,fetcher:typeof fetch=fetch):Promise<LiveMarket>{
  const exchange=query.get('exchange')||'',market=query.get('market')||'',symbol=query.get('symbol')||'',timeframe=query.get('timeframe')||'',duration=durations[timeframe];

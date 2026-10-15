@@ -1,11 +1,12 @@
+import {demoProtections} from "@/lib/server/demo-protection";
 import {withAccount} from "@/lib/server/accounts";
-import { cancelDemo, demoAccount, previewDemo, reconcileDemo, submitDemo } from "@/lib/server/demo-execution";
+import { cancelDemo, demoAccount, maintainDemoProtection, previewDemo, reconcileDemo, submitDemo } from "@/lib/server/demo-execution";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 import { configureDemoBot, demoBots } from "@/lib/server/demo-bots";
 export const runtime = "nodejs";
 async function handleGET(request: Request) {
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
-  try { const id = workspaceSession(request).id; return Response.json({ ...(await demoAccount(id)), bots: demoBots(id) }, { headers: { "Cache-Control": "no-store" } }); }
+  try { const id = workspaceSession(request).id; const account=await demoAccount(id);await maintainDemoProtection(id,account.positions);return Response.json({ ...account,protections:demoProtections(id), bots: demoBots(id) }, { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Demo account unavailable" }, { status: 502 }); }
 }
 async function handlePOST(request: Request) {

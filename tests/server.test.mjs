@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { randomBytes, generateKeyPairSync, sign } from "node:crypto";
 import { createWorkspace, updateWorkspace, readWorkspace, db, saveCredential, credential, createLink, linkDiscord, discordWorkspace } from "../lib/server/store.ts";
 import { workspaceSession, verifyToken, sameOrigin } from "../lib/server/session.ts";
+import {openPaper} from "../lib/terminal-engine.ts";
 import { tickWorkspace } from "../lib/server/worker.ts";
 import { discordInteraction } from "../lib/server/discord.ts";
 import { verifyBinanceDemo } from "../lib/server/binance-demo.ts";
@@ -46,16 +47,17 @@ test("workspace cookies are signed and mutations require same-origin requests",(
   sameOrigin(new Request("http://localhost/api/terminal/workspace",{headers:{origin:"http://localhost"}}));
   sameOrigin(new Request("http://localhost:3000/api/terminal/workspace",{headers:{host:"127.0.0.1:3000",origin:"http://127.0.0.1:3000"}}));
 });
-test("server worker applies bounded learning, enters once per bar, and protects positions while entries are paused",async()=>{
+test("retired paper automation continues scans without entries and protects historical positions",async()=>{
   const workspaceId=id(); createWorkspace(workspaceId);
   updateWorkspace(workspaceId,ws=>({...ws,portfolio:{...ws.portfolio,paused:false},bots:[{...context,key:"binance:spot:BTC:15m:exchange",enabled:true,learning:true,lastBar:399,tolerance:.08,research:report,error:null,updatedAt:null}]}));
   let calls=0;
-  const research=async(c,t,apply)=>{assert.equal(apply,true);calls++;return report;};
+  const research=async(c,t,apply)=>{assert.equal(apply,false);calls++;return report;};
   await tickWorkspace(workspaceId,async()=>feed(),research);
   let ws=readWorkspace(workspaceId);
-  assert.equal(ws.portfolio.positions.length,1); assert.equal(ws.bots[0].tolerance,.05);
+  assert.equal(ws.portfolio.positions.length,0); assert.equal(ws.bots[0].tolerance,.08);assert.equal(ws.bots[0].enabled,false);assert.equal(ws.bots[0].learning,false);
   await tickWorkspace(workspaceId,async()=>feed(),research);
-  assert.equal(readWorkspace(workspaceId).portfolio.positions.length,1); assert.equal(calls,1);
+  assert.equal(readWorkspace(workspaceId).portfolio.positions.length,0); assert.equal(calls,1);
+  updateWorkspace(workspaceId,ws=>({...ws,portfolio:openPaper(ws.portfolio,feed(),"long",100)}));
   updateWorkspace(workspaceId,ws=>({...ws,portfolio:{...ws.portfolio,paused:true}}));
   await tickWorkspace(workspaceId,async()=>feed(401,106),research);
   ws=readWorkspace(workspaceId); assert.equal(ws.portfolio.positions.length,0); assert.equal(ws.portfolio.fills.length,1); assert.ok(ws.portfolio.fills[0].pnl>0); assert.ok(ws.lastWorkerAt);
@@ -71,7 +73,7 @@ test("Discord links once and signed commands operate the matching persistent acc
     const body=JSON.stringify({type:2,data:{name:"obsidian",options:[{name:"resume"}]},user:{id:"123456789"}});
     const timestamp=String(Math.floor(Date.now()/1000));const signature=sign(null,Buffer.from(timestamp+body),privateKey).toString("hex");
     const response=await discordInteraction(new Request("http://localhost/api/terminal/discord",{method:"POST",body,headers:{"x-signature-timestamp":timestamp,"x-signature-ed25519":signature}}));
-    assert.equal(response.status,200);assert.equal(readWorkspace(workspaceId).portfolio.paused,false);
+    assert.equal(response.status,200);assert.equal(readWorkspace(workspaceId).portfolio.paused,true);
     assert.equal((await response.json()).data.flags,64);
   }finally{if(old)process.env.DISCORD_PUBLIC_KEY=old;else delete process.env.DISCORD_PUBLIC_KEY;}
 });

@@ -1,3 +1,4 @@
+import {demoProtections} from "./demo-protection.ts";
 import {tradeFeedback} from "./trade-feedback.ts";
 import {vaultDirectory,currentAccount} from "./account-context.ts";
 import {nineRouterRoutes, NINE_ROUTER_URL} from './nine-router.ts';
@@ -20,7 +21,7 @@ export const TEAM_ROLES = [
 ] as const;
 type TeamMessage = { role: string; name: string; model: string; text: string; inputTokens: number; outputTokens: number; cachedTokens: number; costUsd: number };
 export type TeamRun = { id: string; status: string; question: string; contextKey: string; created: number; messages: TeamMessage[]; costUsd: number; note?: string; error?: string; cacheHit?: boolean; provider?: string };
-export type TeamSettings = { enabled: boolean; intervalMinutes: number; contextKey: string; nextAt: number; allowEscalation: boolean };
+export type TeamSettings = { enabled: boolean; intervalMinutes: number; contextKey: string; nextAt: number; allowEscalation: boolean; state?:"waiting"|"scheduled"|"reviewing"|"needs-setup"; message?:string };
 const DEFAULT_SETTINGS: TeamSettings = { enabled: false, intervalMinutes: 240, contextKey: "", nextAt: 0, allowEscalation: false };
 export function researchContexts(workspaceId: string) {
   return [...readWorkspace(workspaceId).bots.filter(b => b.research).map(b => ({ key: b.key, label: `${b.exchange} ${b.symbol} ${b.market} ${b.timeframe} · ${b.source}` })), ...demoBots(workspaceId).filter(b => b.research).map(b => ({ key: `binance-demo:perpetual:${b.symbol}:${b.timeframe}`, label: `BINANCE DEMO ${b.symbol} ${b.timeframe}` }))];
@@ -110,7 +111,7 @@ function outputLimit(fallback = 2000) {
   return n;
 }
 export function saveDailyCallLimit(value: number) {
-  if (!Number.isInteger(value) || value < 3 || value > 1000) throw new Error("Choose 3–1000 daily gateway calls");
+  if (!Number.isInteger(value) || value < 0 || (value > 0 && value < 3) || value > 1000) throw new Error("Choose 0 (no app call limit) or 3–1000 daily gateway calls");
   db().exec("CREATE TABLE IF NOT EXISTS team_budget_settings (id INTEGER PRIMARY KEY CHECK(id=1), daily_calls INTEGER NOT NULL)");
   db().prepare("INSERT INTO team_budget_settings VALUES (1,?) ON CONFLICT(id) DO UPDATE SET daily_calls=excluded.daily_calls").run(value);
   return budgetStatus();
@@ -122,7 +123,7 @@ function dailyCallLimit(fallback: number) {
 export function budgetConfig(provider = selectedAiProvider()) {
   if (!["openrouter_free", "free_cloud", "free_remote", "freeride", "openai", "nine_router", "groq_free"].includes(provider)) throw new Error("Choose a supported AI router: free_cloud, groq_free, openrouter_free, freeride, nine_router, free_remote or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || provider === "free_cloud" || provider === "nine_router" || provider === "groq_free" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? currentAccount()?"auto-free":process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || provider === "free_cloud" || provider === "nine_router" || provider === "groq_free" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: free ? 0 : dailyCallLimit(process.env.TEAM_DAILY_CALL_LIMIT==="0"?0:Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? currentAccount()?"auto-free":process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -137,7 +138,7 @@ export function saveTeamSettings(workspaceId: string, value: Partial<TeamSetting
 export function teamRuns(workspaceId: string): TeamRun[] { return (db().prepare("SELECT state FROM team_runs WHERE workspace_id=? ORDER BY created DESC LIMIT 12").all(workspaceId) as { state: string }[]).map(r => JSON.parse(r.state)); }
 export function budgetStatus() {
   const rows = db().prepare("SELECT reserved, charged, input_tokens, output_tokens, cached_tokens, status FROM ai_calls WHERE day=?").all(utcDay()) as { reserved: number; charged: number; input_tokens: number; output_tokens: number; cached_tokens: number; status: string }[];
-  return { ...budgetConfig(), day: utcDay(), resetsAt: new Date(Date.parse(utcDay() + "T00:00:00Z") + 86400000).toISOString(), remainingCalls: Math.max(0, budgetConfig().dailyCalls - rows.length), usedUsd: rows.reduce((s, r) => s + r.charged, 0), reservedUsd: rows.reduce((s, r) => s + (["RESERVED", "UNKNOWN"].includes(r.status) ? r.reserved : 0), 0), calls: rows.length, inputTokens: rows.reduce((s, r) => s + r.input_tokens, 0), outputTokens: rows.reduce((s, r) => s + r.output_tokens, 0), cachedTokens: rows.reduce((s, r) => s + r.cached_tokens, 0), unknownCalls: rows.filter(r => r.status === "UNKNOWN" || r.status === "RESERVED").length };
+  return { ...budgetConfig(), day: utcDay(), resetsAt: new Date(Date.parse(utcDay() + "T00:00:00Z") + 86400000).toISOString(), remainingCalls: budgetConfig().dailyCalls===0 ? null : Math.max(0, budgetConfig().dailyCalls - rows.length), usedUsd: rows.reduce((s, r) => s + r.charged, 0), reservedUsd: rows.reduce((s, r) => s + (["RESERVED", "UNKNOWN"].includes(r.status) ? r.reserved : 0), 0), calls: rows.length, inputTokens: rows.reduce((s, r) => s + r.input_tokens, 0), outputTokens: rows.reduce((s, r) => s + r.output_tokens, 0), cachedTokens: rows.reduce((s, r) => s + r.cached_tokens, 0), unknownCalls: rows.filter(r => r.status === "UNKNOWN" || r.status === "RESERVED").length };
 }
 function persist(workspaceId: string, cacheKey: string, run: TeamRun) { db().prepare("INSERT INTO team_runs VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state=excluded.state").run(run.id, workspaceId, cacheKey, JSON.stringify(run), run.created); return run; }
 function takeLease(workspaceId: string) { const now = Date.now(); const result = db().prepare("INSERT INTO team_locks VALUES (?, ?) ON CONFLICT(workspace_id) DO UPDATE SET expires=excluded.expires WHERE team_locks.expires < ?").run(workspaceId, now + 600000, now); if (!result.changes) throw new Error("A research team run is already in progress"); }
@@ -148,7 +149,7 @@ function reserve(workspaceId: string, runId: string, role: string, model: string
     const total = connection.prepare("SELECT COALESCE(SUM(charged + CASE WHEN status IN ('RESERVED','UNKNOWN') THEN reserved ELSE 0 END), 0) AS amount FROM ai_calls WHERE run_id=?").get(runId) as { amount: number };
     if (budget.usedUsd + budget.reservedUsd + amount > budget.dailyUsd) throw new Error(`Daily spending limit reached, including uncertain reservations. Resets ${budget.resetsAt}; no provider request was made`);
     if (total.amount + amount > budget.runUsd) throw new Error("Per-run spending limit reached; no provider request was made");
-    if (budget.calls >= budget.dailyCalls) throw new Error(`Daily call limit reached (${budget.calls}/${budget.dailyCalls}). Resets ${budget.resetsAt}. Adjust Daily call allowance or wait; no provider request was made`);
+    if (budget.dailyCalls>0 && budget.calls >= budget.dailyCalls) throw new Error(`Daily call limit reached (${budget.calls}/${budget.dailyCalls}). Resets ${budget.resetsAt}. Adjust Daily call allowance or wait; no provider request was made`);
     const id = randomUUID(); connection.prepare("INSERT INTO ai_calls (id,day,workspace_id,run_id,role,model,reserved,charged,status) VALUES (?,?,?,?,?,?,?,0,'RESERVED')").run(id, utcDay(), workspaceId, runId, role, model, amount);
     connection.exec("COMMIT"); return id;
   } catch (error) { connection.exec("ROLLBACK"); throw error; }
@@ -283,11 +284,11 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   if (!bot?.research) throw new Error("Run strategy research for this market first");
   if (escalation && !teamSettings(workspaceId).allowEscalation) throw new Error("Enable reviewed escalation in team settings first");
   const demoOrders = demo ? demoJournal(workspaceId).filter(o => o.symbol === demo.symbol && o.status !== "DRAFT").slice(0, 10).map(o => ({ symbol: o.symbol, side: o.side, quantity: o.quantity, status: o.status, executedQuantity: o.exchange?.executedQty, averagePrice: o.exchange?.avgPrice, reduceOnly: o.reduceOnly, created: o.created })) : undefined;
-  const evidence = JSON.stringify({ recordedOutcomes:tradeFeedback(workspaceId), context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: councilResearch(bot.research), paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) });
+  const evidence = JSON.stringify({ recordedOutcomes:tradeFeedback(workspaceId), context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: councilResearch(bot.research), paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, demoProtection:demo?demoProtections(workspaceId).filter(p=>p.symbol===demo.symbol).slice(-2).map(p=>({symbol:p.symbol,checkedAt:p.checkedAt,legs:p.legs.map(l=>({kind:l.kind,price:l.price,quantity:l.quantity,status:l.status}))})):undefined, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) });
   const canonicalFacts = councilFacts({exchange:bot.exchange,source:bot.source,timeframe:bot.timeframe});
   const memory = vaultMemory(workspaceId);
   const config = budgetConfig();
-  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 10, evidence, canonicalFacts, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 11, evidence, canonicalFacts, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
   const cached = db().prepare("SELECT state FROM team_runs WHERE workspace_id=? AND cache_key=? AND created>? ORDER BY created DESC").all(workspaceId, cacheKey, Date.now() - 21600000) as { state: string }[];
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };
@@ -296,7 +297,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   persist(workspaceId, cacheKey, run);
   try {
   const allowance = budgetStatus();
-  if (allowance.remainingCalls < TEAM_ROLES.length) throw new Error(`Council needs 3 calls; ${allowance.remainingCalls} remain (${allowance.calls}/${allowance.dailyCalls} used). Resets ${allowance.resetsAt}. Increase Daily call allowance or wait; no provider request was made.`);
+  if (allowance.remainingCalls!==null && allowance.remainingCalls < TEAM_ROLES.length) throw new Error(`Council needs 3 calls; ${allowance.remainingCalls} remain (${allowance.calls}/${allowance.dailyCalls} used). Resets ${allowance.resetsAt}. Increase Daily call allowance or wait; no provider request was made.`);
     for (const role of TEAM_ROLES) {
       const input = compactCouncilInput(JSON.stringify({ ownerQuestion: question, canonicalFacts, evidence, obsidianMemory: memory.map(m=>({...m,text:m.text.slice(0,1200),truncated:m.text.length>1200})), teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 1800) })) }));
       const message = await ask(workspaceId, run, role, input, fetcher, escalation && role.id === "risk");
@@ -310,14 +311,34 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   if(run.status==="FAILED") await notifyDiscord(workspaceId,"team:"+run.id,"Penguin AI team stopped: the research review failed. Please check the dashboard; no AI order was placed.");
   return persist(workspaceId, cacheKey, run);
 }
-export async function runScheduledTeams() {
+export async function runScheduledTeams(fetcher:typeof fetch=fetch) {
+  // A demo bot's first closed-bar report starts its council without a separate button.
+  const demos=db().prepare("SELECT workspace_id,state FROM demo_bots").all() as {workspace_id:string;state:string}[];
+  for(const row of demos){const bot=JSON.parse(row.state);if(!bot.enabled||!bot.research)continue;
+    if(!db().prepare("SELECT workspace_id FROM team_settings WHERE workspace_id=?").get(row.workspace_id)){
+      const setting:TeamSettings={enabled:true,intervalMinutes:480,contextKey:`binance-demo:perpetual:${bot.symbol}:${bot.timeframe}`,nextAt:Date.now(),allowEscalation:false,state:"scheduled",message:"Automatic demo review queued"};
+      db().prepare("INSERT OR IGNORE INTO team_settings VALUES (?,?)").run(row.workspace_id,JSON.stringify(setting));
+    }
+  }
   const rows = db().prepare("SELECT workspace_id, state FROM team_settings").all() as { workspace_id: string; state: string }[];
   for (const row of rows) {
-    const setting = JSON.parse(row.state) as TeamSettings;
+    const setting = {...DEFAULT_SETTINGS,...JSON.parse(row.state)} as TeamSettings;
     if (!setting.enabled || setting.nextAt > Date.now()) continue;
-    // Persist the next deadline before work. Schedule never escalates automatically.
-    const claim = db().prepare("UPDATE team_settings SET state=? WHERE workspace_id=? AND state=?").run(JSON.stringify({ ...setting, nextAt: Date.now() + setting.intervalMinutes * 60000 }), row.workspace_id, row.state);
+    if(!researchContexts(row.workspace_id).some(c=>c.key===setting.contextKey))continue;
+    const next={...setting,nextAt:Date.now()+setting.intervalMinutes*60000,state:"reviewing" as NonNullable<TeamSettings["state"]>,message:"Council reviewing recorded evidence"};
+    const claimedState=JSON.stringify(next);
+    const claim = db().prepare("UPDATE team_settings SET state=? WHERE workspace_id=? AND state=?").run(claimedState, row.workspace_id, row.state);
     if (!claim.changes) continue;
-    try { await runTeam(row.workspace_id, setting.contextKey); } catch { /* Limits are visible in persisted runs/budget; next scheduled cycle remains bounded. */ }
+    try {
+      const run=await runTeam(row.workspace_id, setting.contextKey,undefined,false,fetcher);
+      if(run.status!=="COMPLETE"){
+        const message=run.error||"Provider unavailable";
+        const budget=budgetStatus(),reset=/call limit|spending limit|Council needs/.test(message)?Date.parse(budget.resetsAt):0;
+        next.nextAt=Math.max(next.nextAt,reset);next.state="waiting";next.message=`Waiting for provider capacity or configuration. ${message}`;
+      }else{next.state="scheduled";next.message="Briefing saved to Obsidian; next review scheduled";}
+    }catch(error){next.state="waiting";next.message=error instanceof Error?error.message:"Council waiting for setup";}
+    // Do not overwrite an owner's concurrent pause or schedule change.
+    db().prepare("UPDATE team_settings SET state=? WHERE workspace_id=? AND state=?").run(JSON.stringify(next),row.workspace_id,claimedState);
+
   }
 }

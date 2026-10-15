@@ -1,3 +1,5 @@
+> Current workflow: [Demo cockpit guide](DEMO-COCKPIT.md). Paper automation and free-mode app call caps described in older sections below are retired. Existing records are preserved. Charts now support exchange WebSockets; private demo account values still use polling.
+
 # Compare free cloud routes in Penguin
 
 Penguin includes five test profiles. Free-LLM and no-cost-ai are also linked in the screen as provider directories. They have no gateway to install and do not grant tokens.
