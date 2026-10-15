@@ -1,3 +1,4 @@
+import {runAllAccounts} from "./accounts.ts";
 import {notify as notifyDiscord} from './alerts.ts';
 import { demoCandles, openPaper, closePaper, matchesFeed, type Feed, type Research } from "../terminal-engine.ts";
 import { marketResponse } from "./market.ts";
@@ -31,21 +32,21 @@ export async function tickWorkspace(id: string, feedProvider = getFeed, research
     } catch (error) { errors.push(error instanceof Error ? error.message : "Position feed failed"); }
   }
   for (const bot of initial.bots) {
-    if (initial.portfolio.paused || (!bot.enabled && !bot.learning)) continue;
+    if ((initial.portfolio.paused || (!bot.enabled && !bot.learning)) && !bot.scanning) continue;
     try {
       const f = await load(bot); const bar = f.candles.at(-1)!;
       if (bot.lastBar >= bar.time && bot.research) continue;
-      const report: Research = bot.learning || !bot.research ? await researcher(f.candles, bot.tolerance, bot.learning) : bot.research;
+      const report: Research = bot.scanning || bot.learning || !bot.research ? await researcher(f.candles, bot.tolerance, bot.learning && !initial.portfolio.paused) : bot.research;
       const updatedWorkspace = updateWorkspace(id, ws => {
         const current = ws.bots.find(b => b.key === bot.key);
-        if (!current || ws.portfolio.paused || (!current.enabled && !current.learning) || (current.lastBar >= bar.time && current.research)) return ws;
+        if (!current || ((ws.portfolio.paused || (!current.enabled && !current.learning)) && !current.scanning) || (current.lastBar >= bar.time && current.research)) return ws;
         const level = report.snapshot.display_levels.at(-1)?.price;
         let portfolio = ws.portfolio;
-        if (current.enabled && current.lastBar > 0 && bar.time > current.lastBar && level && f.candles.at(-2)!.close < level && bar.close >= level && !portfolio.positions.some(p => matchesFeed(p, f)) && portfolio.cash >= 100) {
+        if (!ws.portfolio.paused && current.enabled && current.lastBar > 0 && bar.time > current.lastBar && level && f.candles.at(-2)!.close < level && bar.close >= level && !portfolio.positions.some(p => matchesFeed(p, f)) && portfolio.cash >= 100) {
           try { portfolio = openPaper(portfolio, f, "long", Math.min(500, portfolio.cash * .1)); }
           catch (error) { errors.push(error instanceof Error ? error.message : "Paper risk limit vetoed entry"); }
         }
-        return { ...ws, portfolio, bots: ws.bots.map(b => b.key === bot.key ? { ...b, lastBar: bar.time, research: report, tolerance: current.learning ? report.active_tolerance : current.tolerance, error: null, updatedAt: new Date().toISOString() } : b) };
+        return { ...ws, portfolio, bots: ws.bots.map(b => b.key === bot.key ? { ...b, lastBar: bar.time, research: report, tolerance: current.learning && !ws.portfolio.paused ? report.active_tolerance : current.tolerance, error: null, updatedAt: new Date().toISOString() } : b) };
       });
       if (updatedWorkspace.bots.find(b => b.key === bot.key)?.lastBar === bar.time) saveVaultNote(id, f, report, updatedWorkspace.portfolio);
     } catch (error) { const message = error instanceof Error ? error.message : "Paper bot failed"; errors.push(message); updateWorkspace(id, ws => ({ ...ws, bots: ws.bots.map(b => b.key === bot.key ? { ...b, error: message } : b) })); }
@@ -55,16 +56,16 @@ export async function tickWorkspace(id: string, feedProvider = getFeed, research
   if(errors.length) await notifyDiscord(id,"worker:"+Math.floor(Date.now()/3600000),"Penguin execution monitor: a paper worker/feed failed. Check the dashboard. Existing protection depends on server/feed availability.");
   updateWorkspace(id, ws => ({ ...ws, lastWorkerAt: new Date().toISOString(), workerError: errors.length ? errors.join(" · ") : null }));
 }
-const worker = globalThis as unknown as { obsidianPaperTimer?: NodeJS.Timeout; obsidianPaperBusy?: boolean };
+const worker = globalThis as unknown as { obsidianPaperTimer?: NodeJS.Timeout; obsidianPaperBusy?: boolean; obsidianScanRoundBusy?:boolean };
 export async function runPaperCycle() { if (worker.obsidianPaperBusy) return; worker.obsidianPaperBusy = true; try { for (const id of workspaceIds()) await tickWorkspace(id); } finally { worker.obsidianPaperBusy = false; } }
 export function startPaperWorker() {
   if (process.env.TERMINAL_WORKER_DISABLED === "1" || worker.obsidianPaperTimer) return;
-  worker.obsidianPaperTimer = setInterval(() => { void runPaperCycle().catch(() => {}); }, 30000); worker.obsidianPaperTimer.unref();
+  worker.obsidianPaperTimer = setInterval(() => { if(worker.obsidianScanRoundBusy)return;worker.obsidianScanRoundBusy=true;void runAllAccounts(runPaperCycle).catch(() => {}).finally(()=>{worker.obsidianScanRoundBusy=false;}); }, 30000); worker.obsidianPaperTimer.unref();
   const demoWorker = globalThis as unknown as { obsidianDemoTimer?: NodeJS.Timeout; obsidianDemoBusy?: boolean };
   if (!demoWorker.obsidianDemoTimer) {
     demoWorker.obsidianDemoTimer = setInterval(() => {
       if (demoWorker.obsidianDemoBusy) return; demoWorker.obsidianDemoBusy = true;
-      void runDemoCycle().catch(() => {}).finally(() => { demoWorker.obsidianDemoBusy = false; });
+      void runAllAccounts(runDemoCycle).catch(() => {}).finally(() => { demoWorker.obsidianDemoBusy = false; });
     }, 30000); demoWorker.obsidianDemoTimer.unref();
   }
   const teamWorker = globalThis as unknown as { obsidianTeamTimer?: NodeJS.Timeout; obsidianTeamBusy?: boolean };
@@ -72,7 +73,7 @@ export function startPaperWorker() {
     teamWorker.obsidianTeamTimer = setInterval(() => {
       if (teamWorker.obsidianTeamBusy) return;
       teamWorker.obsidianTeamBusy = true;
-      void runScheduledTeams().catch(() => {}).finally(() => { teamWorker.obsidianTeamBusy = false; });
+      void runAllAccounts(runScheduledTeams).catch(() => {}).finally(() => { teamWorker.obsidianTeamBusy = false; });
     }, 60000);
     teamWorker.obsidianTeamTimer.unref();
   }

@@ -1,3 +1,4 @@
+import {currentAccount} from "./account-context.ts";
 import {createHash} from 'node:crypto';
 import {credential,db} from './store.ts';
 export type FreeRoute={provider:'groq'|'openrouter';model:string;endpoint:string;key:string;identity:string;parameters:Record<string,unknown>};
@@ -8,18 +9,16 @@ export function selectedAiProvider(){
  db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');
  const saved=(db().prepare('SELECT provider FROM ai_routing WHERE id=1').get() as {provider:string}|undefined)?.provider;
  if(saved)return saved;
- const configured=process.env.TEAM_AI_PROVIDER||'openrouter_free';
- // Old .env files should not keep users on the compatibility gateway after upgrading.
- return configured==='freeride'&&process.env.TEAM_KEEP_LEGACY_GATEWAY!=='1'?'free_cloud':configured;
+ return currentAccount()?'free_cloud':process.env.TEAM_AI_PROVIDER||'free_cloud';
 }
-export function saveAiRouting(provider:string){if(!['free_cloud','freeride','openrouter_free','groq_free','nine_router'].includes(provider))throw new Error('Choose a supported free router');db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');db().prepare('INSERT INTO ai_routing VALUES (1,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider').run(provider);return provider;}
+export function saveAiRouting(provider:string){if(currentAccount()&&!['free_cloud','groq_free','openrouter_free'].includes(provider))throw new Error('Customer accounts use private direct free routes; shared host gateways are unavailable');if(!['free_cloud','freeride','openrouter_free','groq_free','nine_router'].includes(provider))throw new Error('Choose a supported free router');db().exec('CREATE TABLE IF NOT EXISTS ai_routing (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL)');db().prepare('INSERT INTO ai_routing VALUES (1,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider').run(provider);return provider;}
 export async function inspectFreeCloud(fetcher:typeof fetch=fetch, only?:FreeProvider){
  const providers=[{provider:'groq' as const,key:credential('GROQ_API_KEY'),base:'https://api.groq.com/openai/v1'},{provider:'openrouter' as const,key:credential('TEAM_REMOTE_KEY'),base:'https://openrouter.ai/api/v1'}].filter(p=>!only||p.provider===only);
  const checks:CatalogCheck[]=[];
  const lists=await Promise.allSettled(providers.map(async p=>{
   const check:CatalogCheck={provider:p.provider,status:'unavailable',message:'',eligibleModels:0,availableModels:0};checks.push(check);
   if(!p.key){check.status='key_missing';check.message='API key missing in this Penguin process. Save it privately in Connections; check the project folder and TERMINAL_DATA_DIR.';return [];}
-  if(p.provider==='groq'&&process.env.FREERIDE_GROQ_FREE_CONFIRMED!=='1'){check.status='confirmation_off';check.message='Key is saved, but FREERIDE_GROQ_FREE_CONFIRMED=1 is not loaded by this Penguin process. Confirm your free plan, set it once in .env.local, then restart Penguin. A separately running FreeRide may have different settings.';return [];}
+  if(p.provider==='groq'&&(currentAccount()?((db().prepare('SELECT value FROM account_preferences WHERE name=?').get('groq_free_confirmed') as {value:string}|undefined)?.value!=='1'):process.env.FREERIDE_GROQ_FREE_CONFIRMED!=='1')){check.status='confirmation_off';check.message=currentAccount()?'Key is saved. Confirm your Groq free plan using the checkbox in Connections.':'Key is saved, but FREERIDE_GROQ_FREE_CONFIRMED=1 is not loaded by this Penguin process. Confirm your free plan, set it once in .env.local, then restart Penguin. A separately running FreeRide may have different settings.';return [];}
   const hash=createHash('sha256').update(p.provider+p.key).digest('hex'),hit=cache.get(hash);
   let catalogRoutes=hit&&Date.now()-hit.at<60000?hit.routes:undefined;
   if(!catalogRoutes){
@@ -34,7 +33,7 @@ export async function inspectFreeCloud(fetcher:typeof fetch=fetch, only?:FreePro
    if(p.provider==='groq')return ['llama-3.1-8b-instant','llama-3.3-70b-versatile','openai/gpt-oss-20b','openai/gpt-oss-120b'].includes(m.id);
    return m.id.endsWith(':free')&&(m.context_length||0)>=16384&&m.architecture?.output_modalities?.includes('text')&&m.pricing?.prompt!==undefined&&m.pricing?.completion!==undefined&&Object.values(m.pricing).every(v=>(typeof v==='string'||typeof v==='number')&&v!==null&&String(v).trim()!==''&&Number.isFinite(Number(v))&&Number(v)===0)&&!/apodex|deepseek.*r1|qwq|reasoner|thinking/i.test(m.id);
   });
-  const routes:FreeRoute[]=models.map((m:{id:string;supported_parameters?:string[]})=>({provider:p.provider,model:m.id,endpoint:p.base+'/chat/completions',key:p.key!,identity:createHash('sha256').update(p.base+'/chat/completions'+m.id).digest('hex'),parameters:p.provider==='groq'&&m.id.startsWith('openai/gpt-oss')?{reasoning_effort:'low'}:p.provider==='openrouter'&&m.supported_parameters?.includes('reasoning')?{reasoning:{enabled:false}}:{}})).sort((a:FreeRoute,b:FreeRoute)=>Number(a.model.includes('gpt-oss'))-Number(b.model.includes('gpt-oss'))||a.model.localeCompare(b.model));
+  const routes:FreeRoute[]=models.map((m:{id:string;supported_parameters?:string[]})=>({provider:p.provider,model:m.id,endpoint:p.base+'/chat/completions',key:p.key!,identity:createHash('sha256').update(p.base+'/chat/completions'+m.id).digest('hex'),parameters:p.provider==='groq'&&m.id.startsWith('openai/gpt-oss')?{reasoning_effort:'low'}:p.provider==='openrouter'&&m.supported_parameters?.includes('reasoning')?{reasoning:{enabled:false}}:{}})).sort((a:FreeRoute,b:FreeRoute)=>(a.model.includes('gpt-oss-120b')?2:a.model.includes('gpt-oss')?1:0)-(b.model.includes('gpt-oss-120b')?2:b.model.includes('gpt-oss')?1:0)||a.model.localeCompare(b.model));
   cache.set(hash,{at:Date.now(),routes});catalogRoutes=routes;
   }
   check.eligibleModels=catalogRoutes.length;

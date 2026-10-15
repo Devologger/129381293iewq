@@ -1,8 +1,9 @@
+import {withAccount} from "@/lib/server/accounts";
 import { runTeam } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 export const runtime = "nodejs";
 // Compatibility endpoint: every AI request shares the persistent team budget.
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
   try {
@@ -13,3 +14,5 @@ export async function POST(request: Request) {
     return Response.json({ note: run.messages.at(-1)?.text, advisory_only: true, run });
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
 }
+
+export const POST = withAccount(handlePOST);

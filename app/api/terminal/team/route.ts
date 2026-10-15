@@ -1,13 +1,15 @@
+import {currentAccount} from "@/lib/server/account-context";
+import {withAccount} from "@/lib/server/accounts";
 import {saveAiRouting} from '@/lib/server/free-cloud';
 import { compareRoutes, routeComparisons, COMPARISON_ROUTES, saveDailyCallLimit, diagnoseProvider, budgetStatus, researchContexts, runTeam, saveTeamSettings, teamRuns, teamSettings, TEAM_ROLES } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 export const runtime = "nodejs";
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
-  try { const id = workspaceSession(request).id; return Response.json({ budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES, comparisons: routeComparisons(id), comparisonRoutes: COMPARISON_ROUTES }, { headers: { "Cache-Control": "no-store" } }); }
+  try { const id = workspaceSession(request).id; return Response.json({ budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES, comparisons: routeComparisons(id), comparisonRoutes: currentAccount()?COMPARISON_ROUTES.filter(r=>!["freeride","nine_router"].includes(r.id)):COMPARISON_ROUTES }, { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
   try {
@@ -28,3 +30,6 @@ export async function POST(request: Request) {
     throw new Error("Unsupported team action");
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team action failed" }, { status: 400 }); }
 }
+
+export const GET = withAccount(handleGET);
+export const POST = withAccount(handlePOST);

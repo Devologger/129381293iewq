@@ -16,6 +16,7 @@ export function freerideToken() {
 export async function providerFailure(response: Response) {
   let evidence = "";
   try { const body = await response.json(); evidence = JSON.stringify(body).slice(0, 16000).toLowerCase(); } catch {}
+  if(response.status===413)return 'Provider rejected an oversized request (413). No inference was accepted; use the compact council request or a smaller output allowance.';
   if (/region|country|geograph/.test(evidence)) return "Provider region restriction: check account availability in your country; routing does not bypass restrictions.";
   if (/privacy|data policy|data-policy|data_policy|data collection/.test(evidence)) return "Model blocked by provider privacy settings. Review OpenRouter Settings > Privacy and choose an allowed free model; only enable data sharing if acceptable to you.";
   if (response.status === 401 || /invalid.*key|unauthoriz|authentication/.test(evidence)) return "Provider rejected authentication. Update the provider API key privately in Connections and restart FreeRide if running.";

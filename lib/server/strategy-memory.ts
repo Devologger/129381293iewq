@@ -1,9 +1,10 @@
+import {vaultDirectory} from "./account-context.ts";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { db } from "./store.ts";
 import type { StrategyLab } from "../strategy-lab-types.ts";
-function folder(id: string) { if (!/^[a-f\d]{48}$/.test(id)) throw new Error("Invalid workspace ID"); return join(process.env.TERMINAL_VAULT_DIR || "obsidian-vault", "Research", id); }
+function folder(id: string) { if (!/^[a-f\d]{48}$/.test(id)) throw new Error("Invalid workspace ID"); return join(vaultDirectory(), "Research", id); }
 export function strategyHistory(id: string, contextKey: string) { return (db().prepare("SELECT state FROM strategy_runs WHERE workspace_id=? AND context_key=? ORDER BY created DESC LIMIT 8").all(id, contextKey) as { state: string }[]).map(r => JSON.parse(r.state) as { report: StrategyLab; source: string; created: number; note: string }); }
 export function saveStrategyEvidence(id: string, contextKey: string, report: StrategyLab, source: string) {
   const signature = createHash("sha256").update(id+contextKey+JSON.stringify(report)).digest("hex");

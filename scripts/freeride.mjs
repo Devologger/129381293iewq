@@ -21,7 +21,7 @@ if (mode === 'install') {
   console.log(`OpenRouter key: ${openrouter ? 'present' : 'missing'}. Groq key: ${groq ? 'present' : 'missing'}. Groq free-plan confirmation: ${process.env.FREERIDE_GROQ_FREE_CONFIRMED === '1' ? 'on' : 'off'}.`);
   if (groq && process.env.FREERIDE_GROQ_FREE_CONFIRMED !== '1') console.log('Groq is disabled: confirm your free plan and set FREERIDE_GROQ_FREE_CONFIRMED=1, then restart this gateway.');
   // Do not hand exchange keys, owner credentials, alternate accounts or local-model settings to FreeRide.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/KEY|TOKEN|SECRET|PASSWORD|^TEAM_|^TRADE_|^BINANCE_|^DISCORD_|^OLLAMA|^FREERIDE|^GROQ|^OPENROUTER|^NVIDIA|^NIM_|^HF_|^HUGGING|^CEREBRAS|^CLOUDFLARE/i.test(name)));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/KEY|TOKEN|SECRET|PASSWORD|^PENGUIN_|^TEAM_|^TRADE_|^BINANCE_|^DISCORD_|^OLLAMA|^FREERIDE|^GROQ|^OPENROUTER|^NVIDIA|^NIM_|^HF_|^HUGGING|^CEREBRAS|^CLOUDFLARE/i.test(name)));
   Object.assign(env, {PENGUIN_GATEWAY_TOKEN:freerideToken(), PENGUIN_GATEWAY_STATE:join(dataDirectory(),'freeride'), FREERIDE_EVENTS:'0', PYTHONUNBUFFERED:'1'});
   env.PENGUIN_ALLOW_REASONING=process.env.FREERIDE_ALLOW_REASONING_MODELS === '1' ? '1' : '0';
   if(process.env.FREERIDE_OPENROUTER_MODEL)env.PENGUIN_OPENROUTER_MODEL=process.env.FREERIDE_OPENROUTER_MODEL;

@@ -1,19 +1,22 @@
+import {configureScan,scannerStatus} from "@/lib/server/scanner";
+import {withAccount} from "@/lib/server/accounts";
 import { closePaper, openPaper } from "@/lib/terminal-engine";
 import { contextKey, createLink, updateWorkspace, type Bot } from "@/lib/server/store";
 import { sameOrigin, workspaceSession } from "@/lib/server/session";
 import { getFeed, validateContext } from "@/lib/server/worker";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const session = workspaceSession(request, true);
-  return Response.json(session.workspace, { headers: { "Cache-Control": "no-store", ...(session.cookie ? { "Set-Cookie": session.cookie } : {}) } });
+  return Response.json({...session.workspace,scanner:scannerStatus(session.id)}, { headers: { "Cache-Control": "no-store", ...(session.cookie ? { "Set-Cookie": session.cookie } : {}) } });
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
   try {
     const session = workspaceSession(request); const text = await request.text();
     if (text.length > 20000) return Response.json({ error: "Payload too large" }, { status: 413 });
     const payload = JSON.parse(text);
+    if (payload.action === "scan") return Response.json(configureScan(session.id,payload.context,payload.enabled));
     if (payload.action === "link") return Response.json({ code: createLink(session.id), expiresInSeconds: 600 });
     if (payload.action === "open") {
       validateContext(payload.context); if (!["long", "short"].includes(payload.side)) throw new Error("Invalid side");
@@ -32,7 +35,7 @@ export async function POST(request: Request) {
       }
       if (payload.action === "remove-bot" || payload.action === "pause-bot") {
         validateContext(payload.context); const key = contextKey(payload.context);
-        return { ...ws, bots: payload.action === "remove-bot" ? ws.bots.filter(b => b.key !== key) : ws.bots.map(b => b.key === key ? { ...b, enabled: false, learning: false } : b) };
+        return { ...ws, bots: payload.action === "remove-bot" ? ws.bots.filter(b => b.key !== key) : ws.bots.map(b => b.key === key ? { ...b, enabled: false, learning: false, scanning:false } : b) };
       }
       if (payload.action === "candidate") {
         validateContext(payload.context); const key = contextKey(payload.context); const candidate = ws.bots.find(b => b.key === key)?.research?.candidate;
@@ -52,3 +55,6 @@ export async function POST(request: Request) {
     }));
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Workspace action failed" }, { status: 400 }); }
 }
+
+export const GET = withAccount(handleGET);
+export const POST = withAccount(handlePOST);

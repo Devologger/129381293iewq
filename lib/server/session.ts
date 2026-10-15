@@ -1,3 +1,4 @@
+import {currentAccount} from "./account-context.ts";
 import { createHmac, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createWorkspace, keyMaterial, readWorkspace } from "./store.ts";
 
@@ -22,6 +23,8 @@ export function cookieHeader(request: Request, name: string, value: string, maxA
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure ? "; Secure" : ""}`;
 }
 export function workspaceSession(request: Request, create = false) {
+  const account=currentAccount();
+  if(account){let workspace;try{workspace=readWorkspace(account.workspaceId);}catch{workspace=createWorkspace(account.workspaceId);}return {id:account.workspaceId,workspace,cookie:null};}
   const verified = verifyToken(cookie(request, "obsidian_workspace"));
   if (verified && /^[a-f\d]{48}$/.test(verified)) {
     try { return { id: verified, workspace: readWorkspace(verified), cookie: null }; } catch { /* Expired/restored storage can lose a workspace. */ }
@@ -31,6 +34,7 @@ export function workspaceSession(request: Request, create = false) {
   return { id, workspace: createWorkspace(id), cookie: cookieHeader(request, "obsidian_workspace", signedToken(id), 31536000) };
 }
 export function ownerSession(request: Request) {
+  if(currentAccount())return true;
   const value = verifyToken(cookie(request, "obsidian_owner"));
   return Boolean(process.env.TERMINAL_ADMIN_PASSWORD && value && /^owner:\d+$/.test(value) && Number(value.slice(6)) > Date.now());
 }

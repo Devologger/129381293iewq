@@ -1,5 +1,6 @@
+import {vaultDirectory,currentAccount} from "./account-context.ts";
 import {nineRouterRoutes, NINE_ROUTER_URL} from './nine-router.ts';
-import {councilResearch,councilFacts,rateResetSeconds} from './council-evidence.ts';
+import {councilResearch,councilFacts,rateResetSeconds,compactCouncilInput} from './council-evidence.ts';
 import {notify as notifyDiscord} from './alerts.ts';
 import {selectedAiProvider, freeCloudRoutes, inspectFreeCloud, coolFreeRoute} from './free-cloud.ts';
 import { FREERIDE_URL, freerideToken, providerFailure } from "./freeride.ts";
@@ -33,7 +34,7 @@ export function remoteProvider(provider = selectedAiProvider()) {
   if (!preset && (!process.env.TEAM_REMOTE_BASE_URL || !process.env.TEAM_REMOTE_MODEL)) throw new Error("Configure the provider's documented TEAM_REMOTE_BASE_URL and free TEAM_REMOTE_MODEL in .env.local; no paid fallback is enabled");
   const url = new URL(preset ? "https://openrouter.ai/api/v1" : process.env.TEAM_REMOTE_BASE_URL!);
   if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.hostname === "api.openai.com") throw new Error("Use a documented HTTPS free-provider base URL without credentials or query parameters");
-  const model = process.env.TEAM_REMOTE_MODEL || "auto-free";
+  const model = currentAccount()?"auto-free":process.env.TEAM_REMOTE_MODEL || "auto-free";
   const allowed = (process.env.TEAM_REMOTE_FREE_MODELS || "").split(",").map(s => s.trim()).filter(Boolean);
   if (!preset && (process.env.TEAM_REMOTE_FREE_CONFIRMED !== "1" || !allowed.includes(model) || allowed.includes("*"))) throw new Error("Confirm the provider's free tier and list the exact free model in TEAM_REMOTE_FREE_MODELS; paid model fallback is disabled");
   const endpoint = url.toString().replace(/\/$/, "") + "/chat/completions";
@@ -56,6 +57,7 @@ export async function selectFreeModel(fetcher: typeof fetch, preferred = "auto-f
   return String(model.id);
 }
 export async function diagnoseProvider(fetcher: typeof fetch = fetch, provider = selectedAiProvider()) {
+  if(currentAccount()&&["freeride","nine_router","openai","free_remote"].includes(provider))throw new Error("Customer accounts use their own private direct free-provider keys; shared host gateways are disabled");
   const config = budgetConfig(provider);
   if (config.provider === "nine_router") { const routes = await nineRouterRoutes(fetcher); return {message:`9Router: ${routes.length} exact routes match verified free catalogs. No inference request made. Gateway upstream attempts are managed by 9Router, not Penguin.`}; }
   if (["free_cloud","groq_free"].includes(config.provider)) {
@@ -119,7 +121,7 @@ function dailyCallLimit(fallback: number) {
 export function budgetConfig(provider = selectedAiProvider()) {
   if (!["openrouter_free", "free_cloud", "free_remote", "freeride", "openai", "nine_router", "groq_free"].includes(provider)) throw new Error("Choose a supported AI router: free_cloud, groq_free, openrouter_free, freeride, nine_router, free_remote or explicitly openai");
   const free = provider !== "openai";
-  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || provider === "free_cloud" || provider === "nine_router" || provider === "groq_free" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
+  return { provider, freeTierDeclared: free && (provider === "openrouter_free" || provider === "freeride" || provider === "free_cloud" || provider === "nine_router" || provider === "groq_free" || process.env.TEAM_REMOTE_FREE_CONFIRMED === "1"), dailyUsd: boundedEnv("TEAM_DAILY_BUDGET_USD", 1, 100), runUsd: boundedEnv("TEAM_RUN_BUDGET_USD", .2, 10), dailyCalls: dailyCallLimit(Math.floor(boundedEnv("TEAM_DAILY_CALL_LIMIT", free ? 9 : 30, 1000))), maxOutput: outputLimit(free ? 2000 : 1000), model: free ? currentAccount()?"auto-free":process.env.TEAM_REMOTE_MODEL || "auto-free" : process.env.TRADE_AI_MODEL || "gpt-5-mini", inputRate: free ? 0 : boundedEnv("TEAM_INPUT_USD_PER_MILLION", 1, 1000), outputRate: free ? 0 : boundedEnv("TEAM_OUTPUT_USD_PER_MILLION", 5, 1000), cachedRate: free ? 0 : boundedEnv("TEAM_CACHED_INPUT_USD_PER_MILLION", 1, 1000) };
 }
 const utcDay = () => new Date().toISOString().slice(0, 10);
 export function teamSettings(workspaceId: string): TeamSettings { const row = db().prepare("SELECT state FROM team_settings WHERE workspace_id=?").get(workspaceId) as { state: string } | undefined; return row ? { ...DEFAULT_SETTINGS, ...JSON.parse(row.state) } : { ...DEFAULT_SETTINGS }; }
@@ -184,12 +186,15 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
       if(cloudRoute) attemptedRoutes.push(`${cloudRoute.provider}/${cloudRoute.model}: HTTP ${response.status}${response.status===429&&rateResetSeconds(response.headers)!==undefined ? ` (reported reset ${rateResetSeconds(response.headers)}s)` : ""}`);
       if(cloudRoute&&response.status>=500) for(const route of cloudRoutes.filter(r=>r.provider===cloudRoute.provider)) coolFreeRoute(route,60);
       // Only an explicit rejection is retryable. 5xx/timeouts may have processed work.
-      const rejected = [400, 401, 403, 404, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
+      const rejected = [400, 401, 403, 404, 413, 429].includes(response.status) || (config.provider === "freeride" && response.status === 409);
       db().prepare("UPDATE ai_calls SET status=? WHERE id=?").run(rejected ? "REJECTED" : "UNKNOWN", callId);
+      if(response.status===413 && attempt===0 && !override?.probe && config.provider!=="nine_router"){
+        input=compactCouncilInput(input,6000);config.maxOutput=Math.min(config.maxOutput,1000);continue;
+      }
       if (cloudRoute && remote && [401,403,404,429].includes(response.status) && attempt === 0 && !override?.probe && config.provider !== "nine_router") {
         const previous = cloudRoute;
         const reset = response.status===429 ? rateResetSeconds(response.headers) : undefined;
-        if(response.status===429&&previous.provider==='groq'&&reset!==undefined&&reset<=30){
+        if(response.status===429&&previous.provider==='groq'&&reset!==undefined&&reset<=60){
           const delay=Math.max(1,reset);coolFreeRoute(previous,delay);
           await new Promise(resolve=>setTimeout(resolve,delay*1000+100));
           continue; // Second and final attempt, only after an explicit rate-limit rejection.
@@ -233,7 +238,7 @@ async function ask(workspaceId: string, run: TeamRun, role: typeof TEAM_ROLES[nu
 }
 function saveTeamNote(workspaceId: string, run: TeamRun) {
   if (!/^[a-f\d]{48}$/.test(workspaceId)) throw new Error("Invalid workspace ID");
-  const directory = join(process.env.TERMINAL_VAULT_DIR || "obsidian-vault", "Research", workspaceId);
+  const directory = join(vaultDirectory(), "Research", workspaceId);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const name = `team-${run.created}-${run.id}.md`, path = join(directory, name);
   const text = `# Research team briefing\n\n[[Strategy Index]] · [[Codex Research Protocol]] · [[Paper Trade Journal]]\n\n- Run: ${run.id}\n- Market: ${run.contextKey}\n- Created: ${new Date(run.created).toISOString()}\n- Accounting estimate: $${run.costUsd.toFixed(6)} (configured rates, not provider invoice)\n- Advisory only; no orders or code changes.\n\n## Review status\nAI-generated advisory proposal. Provider completion does not establish factual correctness or strategy approval. Check geometry, dates, source labels and acceptance criteria against the implementation. No new experiment was executed by this review.\n\n## Owner question\n${run.question}\n\n${run.messages.map(m => `## ${m.name}\nModel: ${m.model} · tokens ${m.inputTokens} input / ${m.outputTokens} output\n\n${m.text}`).join("\n\n")}\n`;
@@ -277,11 +282,11 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   if (!bot?.research) throw new Error("Run strategy research for this market first");
   if (escalation && !teamSettings(workspaceId).allowEscalation) throw new Error("Enable reviewed escalation in team settings first");
   const demoOrders = demo ? demoJournal(workspaceId).filter(o => o.symbol === demo.symbol && o.status !== "DRAFT").slice(0, 10).map(o => ({ symbol: o.symbol, side: o.side, quantity: o.quantity, status: o.status, executedQuantity: o.exchange?.executedQty, averagePrice: o.exchange?.avgPrice, reduceOnly: o.reduceOnly, created: o.created })) : undefined;
-  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: councilResearch(bot.research), paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) }).slice(0, 18000);
+  const evidence = JSON.stringify({ context: { exchange: bot.exchange, market: bot.market, symbol: bot.symbol, timeframe: bot.timeframe, source: bot.source }, distributionContext: bot.research.strategy_lab?.profile_context, research: councilResearch(bot.research), paper: { cash: workspace.portfolio.cash, positions: workspace.portfolio.positions.length, openPositions:workspace.portfolio.positions.map(p=>({symbol:p.symbol,exchange:p.exchange,side:p.side,entry:p.entry,stop:p.stop,target:p.target,collateral:p.collateral})), fills: workspace.portfolio.fills.slice(-10) }, demoOrders, historicalExperiments: strategyHistory(workspaceId,contextKey).slice(0,3).map(h=>({source:h.source,asOf:h.report.as_of,selected:h.report.training_selected,decision:h.report.decision})) });
   const canonicalFacts = councilFacts({exchange:bot.exchange,source:bot.source,timeframe:bot.timeframe});
   const memory = vaultMemory(workspaceId);
   const config = budgetConfig();
-  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 8, evidence, canonicalFacts, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
+  const cacheKey = createHash("sha256").update(JSON.stringify({ version: 9, evidence, canonicalFacts, memory, question, escalation, inference: { provider: config.provider, model: config.model, maxOutput: config.maxOutput }, remoteBase: process.env.TEAM_REMOTE_BASE_URL, premiumModel: process.env.TEAM_ESCALATION_MODEL })).digest("hex");
   const cached = db().prepare("SELECT state FROM team_runs WHERE workspace_id=? AND cache_key=? AND created>? ORDER BY created DESC").all(workspaceId, cacheKey, Date.now() - 21600000) as { state: string }[];
   const hit = cached.map(r => JSON.parse(r.state) as TeamRun).find(r => r.status === "COMPLETE");
   if (hit) return { ...hit, cacheHit: true };
@@ -292,7 +297,7 @@ export async function runTeam(workspaceId: string, contextKey: string, question 
   const allowance = budgetStatus();
   if (allowance.remainingCalls < TEAM_ROLES.length) throw new Error(`Council needs 3 calls; ${allowance.remainingCalls} remain (${allowance.calls}/${allowance.dailyCalls} used). Resets ${allowance.resetsAt}. Increase Daily call allowance or wait; no provider request was made.`);
     for (const role of TEAM_ROLES) {
-      const input = JSON.stringify({ ownerQuestion: question, canonicalFacts, evidence, obsidianMemory: memory.map(m=>({...m,text:m.text.slice(0,1200),truncated:m.text.length>1200})), teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 1800) })) });
+      const input = compactCouncilInput(JSON.stringify({ ownerQuestion: question, canonicalFacts, evidence, obsidianMemory: memory.map(m=>({...m,text:m.text.slice(0,1200),truncated:m.text.length>1200})), teamDiscussion: run.messages.map(m => ({ role: m.role, text: m.text.slice(0, 1800) })) }));
       const message = await ask(workspaceId, run, role, input, fetcher, escalation && role.id === "risk");
       run.messages.push(message); run.costUsd += message.costUsd; persist(workspaceId, cacheKey, run);
     }

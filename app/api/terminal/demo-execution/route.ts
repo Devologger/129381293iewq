@@ -1,13 +1,14 @@
+import {withAccount} from "@/lib/server/accounts";
 import { cancelDemo, demoAccount, previewDemo, reconcileDemo, submitDemo } from "@/lib/server/demo-execution";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
 import { configureDemoBot, demoBots } from "@/lib/server/demo-bots";
 export const runtime = "nodejs";
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
   try { const id = workspaceSession(request).id; return Response.json({ ...(await demoAccount(id)), bots: demoBots(id) }, { headers: { "Cache-Control": "no-store" } }); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Demo account unavailable" }, { status: 502 }); }
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
   try {
@@ -22,3 +23,6 @@ export async function POST(request: Request) {
     throw new Error("Explicit Binance demo confirmation required");
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Demo action failed" }, { status: 400 }); }
 }
+
+export const GET = withAccount(handleGET);
+export const POST = withAccount(handlePOST);

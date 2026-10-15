@@ -1,3 +1,4 @@
+import {vaultDirectory} from "./account-context.ts";
 import { randomUUID } from "node:crypto";
 import { createHmac } from "node:crypto";
 import { credential, db } from "./store.ts";
@@ -41,7 +42,7 @@ function save(order: DemoOrder) {
   if (!["DRAFT", "SUBMITTING", "EXPIRED"].includes(order.status)) {
     try {
       if (!/^[a-f\d]{48}$/.test(order.workspaceId)) throw new Error("Invalid workspace ID");
-      const directory = join(process.env.TERMINAL_VAULT_DIR || "obsidian-vault", "Research", order.workspaceId); mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const directory = join(vaultDirectory(), "Research", order.workspaceId); mkdirSync(directory, { recursive: true, mode: 0o700 });
       const path = join(directory, "Binance Demo Order Journal.md");
       const rows = demoJournal(order.workspaceId).filter(o => !["DRAFT", "EXPIRED"].includes(o.status));
       const note = `# Binance USD-M Demo Order Journal\n\n[[Strategy Index]] · [[Paper Trade Journal]] · [[Codex Research Protocol]]\n\nExchange demo funds, separate from the paper ledger. Status is the last reconciled acknowledgement, not a continuously streamed balance. Unknown outcomes require reconciliation.\n\n| Time (UTC) | Contract | Side | Type | Quantity | Status | Executed quantity | Average price | Reduce only |\n|---|---|---|---|---|---|---|---|---|\n${rows.map(o => `| ${new Date(o.created).toISOString()} | ${o.symbol} | ${o.side} | ${o.type} | ${o.quantity} | ${o.status} | ${o.exchange?.executedQty || "—"} | ${o.exchange?.avgPrice || "—"} | ${o.reduceOnly} |`).join("\n")}\n`;

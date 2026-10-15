@@ -1,10 +1,11 @@
+import {withAccount} from "@/lib/server/accounts";
 import { runResearch } from "@/lib/server/research";
 import { getFeed, validateContext } from "@/lib/server/worker";
 import { contextKey, updateWorkspace, type Bot } from "@/lib/server/store";
 import { sameOrigin, workspaceSession } from "@/lib/server/session";
 import { saveVaultNote } from "@/lib/server/vault";
 export const runtime = "nodejs";
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const body = await request.text();
   if (body.length > 250000) return Response.json({ error: "Payload too large" }, { status: 413 });
   try {
@@ -28,3 +29,5 @@ export async function POST(request: Request) {
     return Response.json(await runResearch(data.candles, data.tolerance ?? .08, data.auto_apply === true));
   } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Research failed" }, { status: 422 }); }
 }
+
+export const POST = withAccount(handlePOST);

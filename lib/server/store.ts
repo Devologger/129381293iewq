@@ -1,15 +1,16 @@
 import { DatabaseSync } from "node:sqlite";
+import {currentAccount,accountDataDirectory,rootDataDirectory} from './account-context.ts';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { INITIAL_PORTFOLIO, type Portfolio, type Research } from "../terminal-engine.ts";
 
 export type Context = { exchange: string; market: string; symbol: string; timeframe: string; source: "demo" | "exchange" };
-export type Bot = Context & { key: string; enabled: boolean; learning: boolean; lastBar: number; tolerance: number; research: Research | null; error: string | null; updatedAt: string | null };
+export type Bot = Context & { key: string; enabled: boolean; learning: boolean; scanning?:boolean; lastBar: number; tolerance: number; research: Research | null; error: string | null; updatedAt: string | null };
 export type Workspace = { portfolio: Portfolio; bots: Bot[]; watchlist: string[]; lastWorkerAt: string | null; workerError: string | null };
 const state = globalThis as unknown as { obsidianDatabases?: Map<string, DatabaseSync> };
 
-export function dataDirectory() { return resolve(/* turbopackIgnore: true */ process.env.TERMINAL_DATA_DIR || ".runtime"); }
+export function dataDirectory() { const account=currentAccount();return account?accountDataDirectory(account.id):rootDataDirectory(); }
 export function keyMaterial() {
   mkdirSync(dataDirectory(), { recursive: true, mode: 0o700 });
   const file = join(dataDirectory(), "storage.key");
@@ -43,7 +44,8 @@ export function db() {
     CREATE TABLE IF NOT EXISTS team_locks (workspace_id TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
   connection.exec(`CREATE TABLE IF NOT EXISTS strategy_runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, context_key TEXT NOT NULL, state TEXT NOT NULL, created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS provider_blocks (identity TEXT PRIMARY KEY, reason TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS free_model_cooldowns (model TEXT PRIMARY KEY, expires INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS free_model_cooldowns (model TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS account_preferences (name TEXT PRIMARY KEY, value TEXT NOT NULL);`);
   state.obsidianDatabases.set(directory, connection);
   return connection;
 }
@@ -71,7 +73,7 @@ export function contextKey(c: Context) { return `${c.exchange}:${c.market}:${c.s
 
 export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "GROQ_API_KEY", "NINE_ROUTER_KEY", "DISCORD_PUBLIC_KEY", "DISCORD_WEBHOOK_URL", "JARVIS_TTS_APP_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
 export function credential(name: string): string | undefined {
-  if (process.env[name]) return process.env[name];
+  if (!currentAccount() && process.env[name]) return process.env[name];
   const row = db().prepare("SELECT encrypted FROM credentials WHERE name=?").get(name) as { encrypted: string } | undefined;
   if (!row) return undefined;
   const [iv, tag, data] = row.encrypted.split(".").map(s => Buffer.from(s, "base64"));
@@ -81,7 +83,7 @@ export function credential(name: string): string | undefined {
 }
 export function saveCredential(name: string, value: string) {
   if (!CREDENTIAL_NAMES.includes(name as typeof CREDENTIAL_NAMES[number])) throw new Error("Unsupported setting");
-  if (process.env[name]) throw new Error("This value is managed by environment settings; update it there.");
+  if (!currentAccount() && process.env[name]) throw new Error("This value is managed by environment settings; update it there.");
   if (!value.trim() || value.length > 4096) throw new Error("Enter a nonempty value of at most 4096 characters");
   if (name === "DISCORD_PUBLIC_KEY" && !/^[a-f\d]{64}$/i.test(value.trim())) throw new Error("Discord Public Key must be 64 hexadecimal characters");
   const iv = randomBytes(12); const cipher = createCipheriv("aes-256-gcm", keyMaterial(), iv);

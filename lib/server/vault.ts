@@ -1,10 +1,11 @@
+import {vaultDirectory} from "./account-context.ts";
 import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { vaultReport, type Feed, type Research, type Portfolio } from "../terminal-engine.ts";
 import { saveStrategyEvidence } from "./strategy-memory.ts";
 function workspaceFolder(id: string) {
   if (!/^[a-f\d]{48}$/.test(id)) throw new Error("Invalid workspace ID");
-  const vault = resolve(/* turbopackIgnore: true */ process.env.TERMINAL_VAULT_DIR || "obsidian-vault");
+  const vault = resolve(/* turbopackIgnore: true */ vaultDirectory());
   mkdirSync(vault, { recursive: true, mode: 0o700 });
   const root = realpathSync(vault), directory = join(root, "Research", id);
   mkdirSync(join(root, "Research"), { recursive: true, mode: 0o700 });
