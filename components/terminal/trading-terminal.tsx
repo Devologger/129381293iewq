@@ -94,7 +94,7 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
   const closeJarvis = useCallback(() => setJarvisOpen(false), []);
   const exitCinematic = useCallback(() => setView("terminal"), []);
   const [, setDiscord] = useState(false);
-  const [localTolerance, setTolerance] = useState(.08);
+  const localTolerance = .08;
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState("");
   const [aiKey, setAiKey] = useState("");
