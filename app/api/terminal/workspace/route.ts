@@ -1,3 +1,4 @@
+import {validateDrawings} from "@/lib/chart-context";
 import {tradeFeedback,candidateOutcomeVeto} from "@/lib/server/trade-feedback";
 import {configureScan,scannerStatus} from "@/lib/server/scanner";
 import {withAccount} from "@/lib/server/accounts";
@@ -18,6 +19,7 @@ async function handlePOST(request: Request) {
     if (text.length > 20000) return Response.json({ error: "Payload too large" }, { status: 413 });
     const payload = JSON.parse(text);
     if(payload.action==="open"||payload.action==="candidate"||((payload.action==="automation"||payload.action==="learning")&&payload.enabled===true)||(payload.action==="engine"&&payload.paused===false))throw new Error("Paper automation has been retired. Use Binance demo execution; historical paper positions and journals remain available.");
+    if(payload.action==="drawings"){validateContext(payload.context);validateDrawings(payload.drawings);const key=contextKey(payload.context);return Response.json(updateWorkspace(session.id,ws=>{if(!ws.chartDrawings?.[key]&&Object.keys(ws.chartDrawings||{}).length>=64)throw new Error("64 saved drawing contexts maximum");return {...ws,chartDrawings:{...ws.chartDrawings,[key]:payload.drawings.map((d:{id:string;type:'level'|'trend';points:{time:number;price:number}[]})=>({id:d.id,type:d.type,points:d.points.map(p=>({time:p.time,price:p.price}))}))}};}));}
     if (payload.action === "scan") return Response.json(configureScan(session.id,payload.context,payload.enabled));
     if (payload.action === "link") return Response.json({ code: createLink(session.id), expiresInSeconds: 600 });
     if (payload.action === "open") {

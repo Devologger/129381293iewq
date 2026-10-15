@@ -1,3 +1,4 @@
+import type {ChartDrawing} from '../chart-context.ts';
 import { DatabaseSync } from "node:sqlite";
 import {currentAccount,accountDataDirectory,rootDataDirectory} from './account-context.ts';
 import {recordOutcomes,writeOutcomeNote} from './outcome-ledger.ts';
@@ -8,7 +9,7 @@ import { INITIAL_PORTFOLIO, type Portfolio, type Research } from "../terminal-en
 
 export type Context = { exchange: string; market: string; symbol: string; timeframe: string; source: "demo" | "exchange" };
 export type Bot = Context & { key: string; enabled: boolean; learning: boolean; scanning?:boolean; feedbackPaused?:boolean;feedbackReason?:string; lastBar: number; tolerance: number; research: Research | null; error: string | null; updatedAt: string | null };
-export type Workspace = { portfolio: Portfolio; bots: Bot[]; watchlist: string[]; lastWorkerAt: string | null; workerError: string | null };
+export type Workspace = { chartDrawings?:Record<string,ChartDrawing[]>; portfolio: Portfolio; bots: Bot[]; watchlist: string[]; lastWorkerAt: string | null; workerError: string | null };
 const state = globalThis as unknown as { obsidianDatabases?: Map<string, DatabaseSync> };
 
 export function dataDirectory() { const account=currentAccount();return account?accountDataDirectory(account.id):rootDataDirectory(); }
@@ -76,7 +77,7 @@ export function updateWorkspace(id: string, change: (workspace: Workspace) => Wo
 export function workspaceIds() { return (db().prepare("SELECT id FROM workspaces").all() as { id: string }[]).map(r => r.id); }
 export function contextKey(c: Context) { return `${c.exchange}:${c.market}:${c.symbol}:${c.timeframe}:${c.source}`; }
 
-export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "GROQ_API_KEY", "NINE_ROUTER_KEY", "DISCORD_PUBLIC_KEY", "DISCORD_WEBHOOK_URL", "JARVIS_TTS_APP_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET"] as const;
+export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "GROQ_API_KEY", "NINE_ROUTER_KEY", "DISCORD_PUBLIC_KEY", "DISCORD_WEBHOOK_URL", "JARVIS_TTS_APP_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET", "BINANCE_LIVE_API_KEY", "BINANCE_LIVE_API_SECRET"] as const;
 export function credential(name: string): string | undefined {
   if (!currentAccount() && process.env[name]) return process.env[name];
   const row = db().prepare("SELECT encrypted FROM credentials WHERE name=?").get(name) as { encrypted: string } | undefined;

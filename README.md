@@ -4,6 +4,8 @@ A standalone trading dashboard and paper and Binance USD-M demo automation servi
 
 `Devologger/312897ads` was a strategy and connection reference. This app does **not** need that checkout, its API, its database, its authentication, or port 8000. The canonical directional Fibonacci model is bundled under `research/`; provenance is in NOTICE.md.
 
+See [real Binance connection and chart tools](docs/REAL-BINANCE-AND-CHARTS.md) for the new read-only production account viewer, active-trade overlays, symbol focusing, frozen-POC bias and TradingView option.
+
 ## Start
 
 Requires Node >=24 and Python >=3.12 (validated in cloud on Node 24 / Python 3.12). Windows Python 3.14 can be selected with `npm.cmd run setup:windows`. See the [Windows guide](docs/WINDOWS-QUICKSTART.md). Python research uses only the standard library; there is no Python dependency installation or separate API process.
