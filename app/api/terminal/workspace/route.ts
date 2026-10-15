@@ -1,3 +1,4 @@
+import {tradeFeedback,candidateOutcomeVeto} from "@/lib/server/trade-feedback";
 import {configureScan,scannerStatus} from "@/lib/server/scanner";
 import {withAccount} from "@/lib/server/accounts";
 import { closePaper, openPaper } from "@/lib/terminal-engine";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 async function handleGET(request: Request) {
   const session = workspaceSession(request, true);
-  return Response.json({...session.workspace,scanner:scannerStatus(session.id)}, { headers: { "Cache-Control": "no-store", ...(session.cookie ? { "Set-Cookie": session.cookie } : {}) } });
+  return Response.json({...session.workspace,scanner:scannerStatus(session.id),feedback:tradeFeedback(session.id)}, { headers: { "Cache-Control": "no-store", ...(session.cookie ? { "Set-Cookie": session.cookie } : {}) } });
 }
 async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
@@ -37,15 +38,18 @@ async function handlePOST(request: Request) {
         validateContext(payload.context); const key = contextKey(payload.context);
         return { ...ws, bots: payload.action === "remove-bot" ? ws.bots.filter(b => b.key !== key) : ws.bots.map(b => b.key === key ? { ...b, enabled: false, learning: false, scanning:false } : b) };
       }
+      if(payload.action==='acknowledge-feedback'){validateContext(payload.context);if(payload.confirmed!==true)throw new Error('Explicit review acknowledgement required');const key=contextKey(payload.context);return {...ws,bots:ws.bots.map(b=>b.key===key?{...b,enabled:false,feedbackPaused:false,feedbackReason:undefined}:b)};}
       if (payload.action === "candidate") {
         validateContext(payload.context); const key = contextKey(payload.context); const candidate = ws.bots.find(b => b.key === key)?.research?.candidate;
         if (typeof candidate !== "number" || ![.05, .08, .12].includes(candidate)) throw new Error("Run server research and obtain a passing paper candidate first");
+        const veto=candidateOutcomeVeto(session.id,payload.context,candidate);if(veto)throw new Error(veto.reason);
         return { ...ws, bots: ws.bots.map(b => b.key === key ? { ...b, tolerance: candidate, research: null } : b) };
       }
       if (payload.action === "automation" || payload.action === "learning") {
         validateContext(payload.context); if (typeof payload.enabled !== "boolean") throw new Error("Invalid automation state");
         if (payload.enabled && (ws.portfolio.paused || payload.context.source !== "exchange")) throw new Error("Enable the paper engine and select exchange data first");
         const key = contextKey(payload.context); const existing = ws.bots.find(b => b.key === key);
+        if(payload.action==='automation'&&payload.enabled&&existing?.feedbackPaused)throw new Error("Review and acknowledge the automatic paper-loss pause first");
         if (!existing && ws.bots.length >= 8) throw new Error("Maximum eight configured paper bots");
         const bot: Bot = existing || { ...payload.context, key, enabled: false, learning: false, tolerance: .08, lastBar: 0, research: null, error: null, updatedAt: null };
         const updated = { ...bot, ...(payload.action === "automation" ? { enabled: payload.enabled } : { learning: payload.enabled }), lastBar: payload.enabled ? 0 : bot.lastBar };

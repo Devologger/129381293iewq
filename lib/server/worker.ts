@@ -1,4 +1,5 @@
 import {runAllAccounts} from "./accounts.ts";
+import {candidateOutcomeVeto} from './trade-feedback.ts';
 import {notify as notifyDiscord} from './alerts.ts';
 import { demoCandles, openPaper, closePaper, matchesFeed, type Feed, type Research } from "../terminal-engine.ts";
 import { marketResponse } from "./market.ts";
@@ -36,14 +37,18 @@ export async function tickWorkspace(id: string, feedProvider = getFeed, research
     try {
       const f = await load(bot); const bar = f.candles.at(-1)!;
       if (bot.lastBar >= bar.time && bot.research) continue;
-      const report: Research = bot.scanning || bot.learning || !bot.research ? await researcher(f.candles, bot.tolerance, bot.learning && !initial.portfolio.paused) : bot.research;
+      let report: Research = bot.scanning || bot.learning || !bot.research ? await researcher(f.candles, bot.tolerance, bot.learning && !initial.portfolio.paused) : bot.research;
+      if(bot.learning && report.candidate!==null && report.active_tolerance!==bot.tolerance){
+        const veto=candidateOutcomeVeto(id,bot,report.active_tolerance);
+        if(veto){const baseline=await researcher(f.candles,bot.tolerance,false);report={...baseline,candidate:null,active_tolerance:bot.tolerance,decision:'veto_recorded_paper_losses',methodology:baseline.methodology+' '+veto.reason};}
+      }
       const updatedWorkspace = updateWorkspace(id, ws => {
         const current = ws.bots.find(b => b.key === bot.key);
         if (!current || ((ws.portfolio.paused || (!current.enabled && !current.learning)) && !current.scanning) || (current.lastBar >= bar.time && current.research)) return ws;
         const level = report.snapshot.display_levels.at(-1)?.price;
         let portfolio = ws.portfolio;
-        if (!ws.portfolio.paused && current.enabled && current.lastBar > 0 && bar.time > current.lastBar && level && f.candles.at(-2)!.close < level && bar.close >= level && !portfolio.positions.some(p => matchesFeed(p, f)) && portfolio.cash >= 100) {
-          try { portfolio = openPaper(portfolio, f, "long", Math.min(500, portfolio.cash * .1)); }
+        if (!ws.portfolio.paused && current.enabled && !current.feedbackPaused && current.lastBar > 0 && bar.time > current.lastBar && level && f.candles.at(-2)!.close < level && bar.close >= level && !portfolio.positions.some(p => matchesFeed(p, f)) && portfolio.cash >= 100) {
+          try { portfolio = openPaper(portfolio, f, "long", Math.min(500, portfolio.cash * .1),{origin:"automation",tolerance:current.learning?report.active_tolerance:current.tolerance,researchAsOf:report.as_of}); }
           catch (error) { errors.push(error instanceof Error ? error.message : "Paper risk limit vetoed entry"); }
         }
         return { ...ws, portfolio, bots: ws.bots.map(b => b.key === bot.key ? { ...b, lastBar: bar.time, research: report, tolerance: current.learning && !ws.portfolio.paused ? report.active_tolerance : current.tolerance, error: null, updatedAt: new Date().toISOString() } : b) };

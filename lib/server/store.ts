@@ -1,12 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
 import {currentAccount,accountDataDirectory,rootDataDirectory} from './account-context.ts';
+import {recordOutcomes,writeOutcomeNote} from './outcome-ledger.ts';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INITIAL_PORTFOLIO, type Portfolio, type Research } from "../terminal-engine.ts";
 
 export type Context = { exchange: string; market: string; symbol: string; timeframe: string; source: "demo" | "exchange" };
-export type Bot = Context & { key: string; enabled: boolean; learning: boolean; scanning?:boolean; lastBar: number; tolerance: number; research: Research | null; error: string | null; updatedAt: string | null };
+export type Bot = Context & { key: string; enabled: boolean; learning: boolean; scanning?:boolean; feedbackPaused?:boolean;feedbackReason?:string; lastBar: number; tolerance: number; research: Research | null; error: string | null; updatedAt: string | null };
 export type Workspace = { portfolio: Portfolio; bots: Bot[]; watchlist: string[]; lastWorkerAt: string | null; workerError: string | null };
 const state = globalThis as unknown as { obsidianDatabases?: Map<string, DatabaseSync> };
 
@@ -46,6 +47,7 @@ export function db() {
     CREATE TABLE IF NOT EXISTS provider_blocks (identity TEXT PRIMARY KEY, reason TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS free_model_cooldowns (model TEXT PRIMARY KEY, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS account_preferences (name TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  connection.exec('CREATE TABLE IF NOT EXISTS trade_outcomes (id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL,closed TEXT NOT NULL,state TEXT NOT NULL); CREATE INDEX IF NOT EXISTS outcomes_workspace ON trade_outcomes(workspace_id)');
   state.obsidianDatabases.set(directory, connection);
   return connection;
 }
@@ -63,9 +65,12 @@ export function updateWorkspace(id: string, change: (workspace: Workspace) => Wo
   const connection = db();
   connection.exec("BEGIN IMMEDIATE");
   try {
-    const result = change(readWorkspace(id));
+    const before=readWorkspace(id),result = change(structuredClone(before));
+    recordOutcomes(connection,id,before,result);
     connection.prepare("UPDATE workspaces SET state=? WHERE id=?").run(JSON.stringify(result), id);
-    connection.exec("COMMIT"); return result;
+    connection.exec("COMMIT");
+    if(result.portfolio.fills.some(f=>!before.portfolio.fills.some(old=>old.id===f.id))){try{writeOutcomeNote(connection,id);}catch{/* The committed SQLite outcome remains authoritative if optional vault storage is unavailable. */}}
+    return result;
   } catch (error) { connection.exec("ROLLBACK"); throw error; }
 }
 export function workspaceIds() { return (db().prepare("SELECT id FROM workspaces").all() as { id: string }[]).map(r => r.id); }

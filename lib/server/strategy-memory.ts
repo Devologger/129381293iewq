@@ -20,7 +20,7 @@ export function saveStrategyEvidence(id: string, contextKey: string, report: Str
 }
 export function vaultMemory(id: string) {
   const directory=folder(id), entries: {name:string;text:string}[]=[];
-  for (const name of ["Learning Memory.md","Agent Memory.md"]) {
+  for (const name of ["Learning Memory.md","Agent Memory.md","Trade Outcomes.md"]) {
     try { const path=realpathSync(join(directory,name)); const root=realpathSync(resolve(directory)); if (!path.startsWith(root+sep)) continue; entries.push({name,text:readFileSync(path,"utf8").slice(0,5000)}); } catch { /* Memory is optional; no runtime/credential paths are scanned. */ }
   }
   return entries;

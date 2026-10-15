@@ -1,8 +1,8 @@
 import type { StrategyLab } from "./strategy-lab-types.ts";
 export type Candle = { time: number; open: number; high: number; low: number; close: number; volume: number };
 export type Feed = { candles: Candle[]; source: "demo" | "exchange"; exchange: string; market: string; symbol: string; timeframe: string; fetchedAt: number };
-export type Position = { id: string; exchange: string; market: string; source: string; symbol: string; timeframe: string; side: "long" | "short"; quantity: number; entry: number; stop: number; target: number; collateral: number; openedAt: string };
-export type Fill = { id: string; symbol: string; exchange: string; source: string; side: string; pnl: number; time: string; reason: string };
+export type Position = { id: string; exchange: string; market: string; source: string; symbol: string; timeframe: string; side: "long" | "short"; quantity: number; entry: number; stop: number; target: number; collateral: number; openedAt: string; origin?:'manual'|'automation'; tolerance?:number; researchAsOf?:number };
+export type Fill = { id: string; symbol: string; exchange: string; source: string; side: string; pnl: number; time: string; reason: string; positionId?:string; market?:string; timeframe?:string; origin?:'manual'|'automation'; entry?:number; exit?:number; stop?:number; target?:number; netR?:number; tolerance?:number; researchAsOf?:number };
 export type Portfolio = { cash: number; positions: Position[]; fills: Fill[]; paused: boolean };
 export const INITIAL_PORTFOLIO: Portfolio = { cash: 10000, positions: [], fills: [], paused: true };
 export const FEE = .0012;
@@ -19,7 +19,7 @@ export function demoCandles(symbol: string, timeframe: string): Candle[] {
   });
 }
 
-export function openPaper(portfolio: Portfolio, feed: Feed, side: "long" | "short", notional: number): Portfolio {
+export function openPaper(portfolio: Portfolio, feed: Feed, side: "long" | "short", notional: number, metadata:{origin?:'manual'|'automation';tolerance?:number;researchAsOf?:number}={}): Portfolio {
   if (portfolio.paused) throw new Error("Enable the paper engine before placing orders.");
   if (!Number.isFinite(notional) || notional < 10 || notional > portfolio.cash / (1 + FEE)) throw new Error("Order exceeds available paper buying power.");
   if (portfolio.positions.length >= 6) throw new Error("Paper risk limit: maximum six open positions.");
@@ -28,7 +28,7 @@ export function openPaper(portfolio: Portfolio, feed: Feed, side: "long" | "shor
   const price = feed.candles.at(-1)?.close;
   if (!price || !Number.isFinite(price) || price <= 0) throw new Error("A valid market price is required.");
   const sign = side === "long" ? 1 : -1;
-  const position: Position = { id: crypto.randomUUID(), exchange: feed.exchange, market: feed.market, source: feed.source, symbol: feed.symbol, timeframe: feed.timeframe, side, quantity: notional / price, entry: price, stop: price * (1 - sign * .02), target: price * (1 + sign * .04), collateral: notional, openedAt: new Date().toISOString() };
+  const position: Position = { id: crypto.randomUUID(), exchange: feed.exchange, market: feed.market, source: feed.source, symbol: feed.symbol, timeframe: feed.timeframe, side, quantity: notional / price, entry: price, stop: price * (1 - sign * .02), target: price * (1 + sign * .04), collateral: notional, openedAt: new Date().toISOString(),origin:metadata.origin||'manual',tolerance:metadata.tolerance,researchAsOf:metadata.researchAsOf };
   return { ...portfolio, cash: portfolio.cash - notional * (1 + FEE), positions: [...portfolio.positions, position] };
 }
 
@@ -45,7 +45,7 @@ export function closePaper(portfolio: Portfolio, id: string, feed: Feed, reason 
   const pnl = gross - exitFee - position.collateral * FEE;
   return { ...portfolio, cash: portfolio.cash + position.collateral + gross - exitFee,
     positions: portfolio.positions.filter(p => p.id !== id),
-    fills: [{ id: crypto.randomUUID(), symbol: position.symbol, exchange: position.exchange, source: position.source, side: position.side, pnl, time: new Date().toISOString(), reason }, ...portfolio.fills].slice(0, 200) };
+    fills: [{ id: crypto.randomUUID(), symbol: position.symbol, exchange: position.exchange, source: position.source, side: position.side, pnl, time: new Date().toISOString(), reason,positionId:position.id,market:position.market,timeframe:position.timeframe,origin:position.origin,entry:position.entry,exit:price,stop:position.stop,target:position.target,netR:pnl/(Math.abs(position.entry-position.stop)*position.quantity),tolerance:position.tolerance,researchAsOf:position.researchAsOf }, ...portfolio.fills].slice(0, 200) };
 }
 
 export function validatePortfolio(value: unknown): value is Portfolio {
