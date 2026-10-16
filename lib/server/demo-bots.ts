@@ -1,3 +1,5 @@
+import {currentAccount} from './account-context.ts';
+import {requireTradingPlan} from './billing.ts';
 import {demoProtections,protectionReady,hasOutstandingProtection} from './demo-protection.ts';
 import {notify as notifyDiscord} from './alerts.ts';
 import { db } from "./store.ts";
@@ -14,6 +16,7 @@ export async function configureDemoBot(workspaceId: string, value: { symbol: str
   if (row && row.workspace_id !== workspaceId) throw new Error("This demo contract is managed by another workspace; each contract has one bot owner");
   const previous = row ? JSON.parse(row.state) as DemoBot : undefined;
   if (value.enabled) {
+    await requireTradingPlan(currentAccount()?.id||'');
     const account = await demoAccount(workspaceId, fetcher);
     if (!previous && account.positions.some(p => p.symbol === value.symbol)) throw new Error("Close the existing demo position before assigning a new bot to this contract");
     if (value.notional > account.limits.maxOrderUsdt) throw new Error("Bot size exceeds the configured demo order cap");

@@ -1,3 +1,5 @@
+import {currentAccount} from './account-context.ts';
+import {requireTradingPlan} from './billing.ts';
 import {demoProtections,hasUnresolvedProtection,hasOutstandingProtection,protectionPlan,protectDemo,reconcileProtections,type ProtectionPlan,protectionReady} from './demo-protection.ts';
 import {vaultDirectory} from "./account-context.ts";
 import { randomUUID } from "node:crypto";
@@ -152,6 +154,7 @@ export async function submitDemo(workspaceId: string, id: string, fetcher: typeo
   const order = owned(workspaceId, id);
   if (order.status !== "DRAFT") return reconcileDemo(workspaceId, id, fetcher);
   if (order.expires < Date.now()) { save({ ...order, status: "EXPIRED" }); throw new Error("Demo preview expired. Create a fresh preview."); }
+  if(!order.reduceOnly)await requireTradingPlan(currentAccount()?.id||'');
   // Atomically claim globally: unknown submissions block further entries across workspaces.
   const connection = db(); connection.exec("BEGIN IMMEDIATE");
   try {

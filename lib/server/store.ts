@@ -1,3 +1,4 @@
+import {hostedEnabled,remoteSecrets,saveHostedSecret} from './hosted.ts';
 import type {ChartDrawing} from '../chart-context.ts';
 import { DatabaseSync } from "node:sqlite";
 import {currentAccount,accountDataDirectory,rootDataDirectory} from './account-context.ts';
@@ -79,6 +80,7 @@ export function contextKey(c: Context) { return `${c.exchange}:${c.market}:${c.s
 
 export const CREDENTIAL_NAMES = ["TRADE_AI_KEY", "TEAM_REMOTE_KEY", "GROQ_API_KEY", "NINE_ROUTER_KEY", "DISCORD_PUBLIC_KEY", "DISCORD_WEBHOOK_URL", "JARVIS_TTS_APP_KEY", "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_API_SECRET", "BINANCE_LIVE_API_KEY", "BINANCE_LIVE_API_SECRET"] as const;
 export function credential(name: string): string | undefined {
+  if(hostedEnabled()){if(!currentAccount())return undefined;const cache=remoteSecrets.getStore();if(!cache)throw new Error("Hosted integrations were not loaded for this account");return cache.get(name);}
   if (!currentAccount() && process.env[name]) return process.env[name];
   const row = db().prepare("SELECT encrypted FROM credentials WHERE name=?").get(name) as { encrypted: string } | undefined;
   if (!row) return undefined;
@@ -88,6 +90,7 @@ export function credential(name: string): string | undefined {
   return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
 }
 export function saveCredential(name: string, value: string) {
+  if(hostedEnabled())throw new Error("Use the asynchronous hosted credential writer");
   if (!CREDENTIAL_NAMES.includes(name as typeof CREDENTIAL_NAMES[number])) throw new Error("Unsupported setting");
   if (!currentAccount() && process.env[name]) throw new Error("This value is managed by environment settings; update it there.");
   if (!value.trim() || value.length > 4096) throw new Error("Enter a nonempty value of at most 4096 characters");
@@ -118,4 +121,13 @@ export function linkDiscord(userId: string, code: string) {
 }
 export function discordWorkspace(userId: string) {
   return (db().prepare("SELECT workspace_id FROM discord_accounts WHERE user_id=?").get(userId) as { workspace_id: string } | undefined)?.workspace_id;
+}
+
+export async function savePrivateCredential(name:string,value:string){
+ if(!hostedEnabled())return saveCredential(name,value);
+ const account=currentAccount();if(!account)throw new Error('Sign in first');
+ if(!CREDENTIAL_NAMES.includes(name as typeof CREDENTIAL_NAMES[number])||name==='JARVIS_TTS_APP_KEY')throw new Error('Unsupported setting');
+ if(typeof value!=='string'||!value.trim()||value.length>4096)throw new Error('Enter a nonempty value of at most 4096 characters');
+ if(name==='DISCORD_PUBLIC_KEY'&&!/^[a-f\d]{64}$/i.test(value.trim()))throw new Error('Discord Public Key must be 64 hexadecimal characters');
+ await saveHostedSecret(account.id,name,value.trim());
 }

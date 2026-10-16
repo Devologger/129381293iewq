@@ -1,3 +1,5 @@
+> **Current interface:** Penguin now uses a professional workspace with Overview, Markets, Research, Knowledge, and Settings. JARVIS voice has been retired; **Ask Penguin** offers text AI help through the same free-route usage ledger. Optional Supabase accounts/encrypted secrets and Stripe subscriptions are implemented; they require your own privately configured services. Read [Hosted setup and release limits](docs/HOSTED-SETUP.md). Earlier voice instructions below are historical and no longer apply. Real Binance remains read-only; no profitability claim is established.
+
 # Penguin Trading Workspace
 
 A standalone trading dashboard and paper and Binance USD-M demo automation service with multi-market charts, bounded Fibonacci learning, a JARVIS-inspired voice console, an Obsidian research vault, a budgeted OpenAI research council, and signed Discord controls.

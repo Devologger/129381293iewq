@@ -1,9 +1,2 @@
-import {withAccount} from "@/lib/server/accounts";
-import {credential} from '@/lib/server/store';
-import {ownerSession,sameOrigin} from '@/lib/server/session';
-export const runtime='nodejs';
-async function handleGET(){return Response.json({configured:Boolean(process.env.JARVIS_TTS_URL&&credential('JARVIS_TTS_APP_KEY'))});}
-async function handlePOST(request:Request){try{sameOrigin(request);if(!ownerSession(request))return Response.json({error:'Unlock Settings to use the remote voice service'},{status:401});const body=await request.text();if(body.length>4000)throw new Error();const {text}=JSON.parse(body);if(typeof text!=='string'||!text.length||text.length>700)throw new Error();const url=new URL(process.env.JARVIS_TTS_URL||'');if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw new Error();const key=credential('JARVIS_TTS_APP_KEY');if(!key)throw new Error();const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis-App-Id':process.env.JARVIS_TTS_APP_ID||'penguin','X-Jarvis-App-Key':key},body:JSON.stringify({text}),signal:AbortSignal.timeout(20000)});if(!response.ok||!/^audio\/(wav|x-wav)/i.test(response.headers.get('content-type')||''))throw new Error();if(Number(response.headers.get('content-length'))>2000000)throw new Error();const audio=await response.arrayBuffer();if(audio.byteLength>2000000)throw new Error();return new Response(audio,{headers:{'Content-Type':'audio/wav','Cache-Control':'no-store'}});}catch{return Response.json({error:'Remote Jarvis voice unavailable; browser voice remains available'},{status:502});}}
-
-export const GET = withAccount(handleGET);
-export const POST = withAccount(handlePOST);
+export async function GET(){return Response.json({configured:false,removed:true});}
+export async function POST(){return Response.json({error:'Voice features have been retired. Use Ask Penguin in the dashboard.'},{status:410});}

@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {db,createWorkspace,updateWorkspace,saveCredential} from '../lib/server/store.ts';
-import {saveDailyCallLimit,runTeam,budgetStatus,selectFreeModel,remoteProvider} from '../lib/server/agent-team.ts';
+import {askAppHelper,saveDailyCallLimit,runTeam,budgetStatus,selectFreeModel,remoteProvider} from '../lib/server/agent-team.ts';
 import {saveStrategyEvidence,vaultMemory} from '../lib/server/strategy-memory.ts';
 const folder=mkdtempSync(join(tmpdir(),'obsidian-free-team-'));process.env.TERMINAL_DATA_DIR=folder;process.env.TERMINAL_VAULT_DIR=join(folder,'vault');delete process.env.TEAM_AI_PROVIDER;
 after(()=>{db().close();rmSync(folder,{recursive:true,force:true});});
@@ -27,3 +27,12 @@ test('strategy memory deduplicates within a workspace without hiding another wor
 test('owner allowance update preserves usage, persists globally and validates bounds',()=>{ const before=budgetStatus(); saveDailyCallLimit(30); const after=budgetStatus(); assert.equal(after.dailyCalls,0); assert.equal(after.calls,before.calls); assert.equal(after.usedUsd,before.usedUsd); assert.equal(after.remainingCalls,null); assert.match(after.resetsAt,/T00:00:00.000Z$/); assert.equal(saveDailyCallLimit(0).remainingCalls,null); assert.throws(()=>saveDailyCallLimit(1001)); assert.throws(()=>saveDailyCallLimit(3.5)); db().prepare('DELETE FROM team_budget_settings').run(); });
 
 test('free council keeps full accounting when an old saved cap is exhausted',async()=>{ const before=budgetStatus().calls; saveDailyCallLimit(Math.max(3,before+2)); const p=provider(); const run=await runTeam(workspace(),contextKey,'Require full council allowance',false,p.fetcher); assert.equal(run.status,'COMPLETE'); assert.equal(p.calls(),3); assert.equal(budgetStatus().calls,before+3); db().prepare('DELETE FROM team_budget_settings').run(); });
+
+test('app helper uses one accounted free request, grounded instructions and cache; uncertain calls retain reservation',async()=>{
+ const id=workspace(),p=provider(),before=budgetStatus().calls;
+ const first=await askAppHelper(id,'How do I use the demo dashboard?',p.fetcher);assert.equal(first.cached,false);assert.equal(p.calls(),1);assert.equal(budgetStatus().calls,before+1);
+ const second=await askAppHelper(id,'How do I use the demo dashboard?',p.fetcher);assert.equal(second.cached,true);assert.equal(p.calls(),1);
+ const unknown=budgetStatus().unknownCalls;
+ await assert.rejects(askAppHelper(id,'What happens if the service times out?',async(url,options)=>{if(url.endsWith('/models'))return Response.json({data:catalog});throw new Error('Synthetic timeout');}),/uncertain/);
+ assert.equal(budgetStatus().unknownCalls,unknown+1);assert.equal(db().prepare('SELECT COUNT(*) AS n FROM team_locks').get().n,0);
+});

@@ -60,3 +60,16 @@ export function saveVaultNote(workspaceId: string, feed: Feed, report: Research,
   if (report.strategy_lab) saveStrategyEvidence(workspaceId, `${feed.exchange}:${feed.market}:${feed.symbol}:${feed.timeframe}:${feed.source}`, report.strategy_lab, feed.source);
   return name;
 }
+
+export async function knowledgeActivity(id:string){
+ const {db,readWorkspace}=await import('./store.ts');
+ const {teamRuns,teamSettings,TEAM_ROLES}=await import('./agent-team.ts');
+ const {tradeFeedback}=await import('./trade-feedback.ts');
+ const workspace=readWorkspace(id),runs=teamRuns(id),feedback=tradeFeedback(id);
+ const studies=(db().prepare('SELECT state,context_key FROM strategy_runs WHERE workspace_id=? ORDER BY created DESC LIMIT 6').all(id) as {state:string;context_key:string}[]).map(row=>{const value=JSON.parse(row.state);return {context:row.context_key,created:value.created,note:value.note,source:value.source,decision:value.report.decision,selected:value.report.training_selected?.strategy,coverageDays:value.report.coverage_days};});
+ const evidence=(db().prepare('SELECT COUNT(*) AS count FROM strategy_runs WHERE workspace_id=?').get(id) as {count:number}).count;
+ return {evidence,completedReviews:runs.filter(r=>r.status==='COMPLETE').length,reviewWindow:runs.length,appliedChanges:0,workerAt:workspace.lastWorkerAt,schedule:teamSettings(id),outcomes:{paper:feedback.paper,automaticExchangePaper:feedback.automaticExchangePaper},studies,
+  roles:TEAM_ROLES.map(role=>{const run=runs.find(r=>r.messages.some(m=>m.role===role.id));const message=run?.messages.find(m=>m.role===role.id);return {id:role.id,name:role.name,text:message?.text||null,created:run?.created||null,model:message?.model||null,status:run?.status||'WAITING'};}),
+  limits:['Notes are retrieved as context; model weights are not trained.','Agent proposals cannot change strategies or submit orders.','Demo realized fills and fees are not yet imported into the outcome dataset.'],
+  recent:runs.map(r=>({id:r.id,created:r.created,status:r.status,context:r.contextKey,note:r.note||null,error:r.error||null}))};
+}

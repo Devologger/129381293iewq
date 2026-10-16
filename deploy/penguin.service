@@ -1,0 +1,27 @@
+# Example for a durable Ubuntu server; paths and Node binary must match deployment.
+[Unit]
+Description=Penguin web application and single trading worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=penguin
+Group=penguin
+WorkingDirectory=/opt/penguin
+Environment=NODE_ENV=production
+Environment=TERMINAL_DATA_DIR=/var/lib/penguin
+EnvironmentFile=/etc/penguin/penguin.env
+ExecStart=/usr/bin/node /opt/penguin/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+StateDirectory=penguin
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/penguin
+
+[Install]
+WantedBy=multi-user.target
