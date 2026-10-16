@@ -43,7 +43,7 @@ test('Stripe validates raw payload signatures, timestamps, and key rotation sign
 });
 test('billing events fetch current subscription and send scoped state to transactional RPC',async()=>{
  process.env.STRIPE_SECRET_KEY='synthetic-stripe';let rpc;
- await applyBillingEvent({id:'evt_test123',created:123,type:'customer.subscription.updated',data:{object:{id:'sub_test123'}}},async(url,options)=>{if(url.startsWith('https://api.stripe.com/'))return Response.json({id:'sub_test123',created:100,customer:'cus_test',metadata:{penguin_user:user.id},status:'active',items:{data:[{price:{id:'price_configured'}}]}});rpc=JSON.parse(options.body);assert.equal(options.headers.apikey,'synthetic-service');return Response.json(null);});assert.equal(rpc.p_user,user.id);assert.equal(rpc.p_subscription_created,100);assert.equal(rpc.p_status,'active');assert.equal(rpc.p_event,'evt_test123');
+ await applyBillingEvent({id:'evt_test123',created:123,type:'customer.subscription.updated',data:{object:{id:'sub_test123'}}},async(url,options)=>{if(url.startsWith('https://api.stripe.com/'))return Response.json({id:'sub_test123',created:100,customer:'cus_test',metadata:{penguin_user:user.id},status:'active',current_period_end:Math.floor(Date.now()/1000)+3600,items:{data:[{price:{id:'price_configured'}}]}});rpc=JSON.parse(options.body);assert.equal(options.headers.apikey,'synthetic-service');return Response.json(null);});assert.equal(rpc.p_user,user.id);assert.equal(rpc.p_subscription_created,100);assert.equal(rpc.p_status,'active');assert.equal(rpc.p_event,'evt_test123');
 });
 
 test('hosted refresh is serialized and never exposes provider tokens in the browser session',async()=>{
@@ -56,17 +56,22 @@ test('hosted signup enforces invitation and enrollment; verification, reset and 
  const identity={...user,id:'99999999-1234-1234-1234-123456789abc',email:'invited@example.test'};let calls=0;
  global.fetch=async(url)=>{calls++;if(url.endsWith('/signup'))return Response.json({user:identity});if(url.endsWith('/verify')||url.includes('grant_type=password'))return Response.json({...tokens,user:identity});if(url.includes('/logout')||url.endsWith('/recover'))return new Response(null,{status:204});if(url.endsWith('/user'))return Response.json(identity);throw new Error('Unexpected request');};
  const req=new Request('https://penguin.test/api/account');
- await assert.rejects(hostedAccountAction(req,{action:'signup',email:identity.email,name:'Invited',password:'synthetic-password',invitation:'wrong'}),/Invitation/);assert.equal(calls,0);
+ await assert.rejects(hostedAccountAction(req,{action:'signup',email:identity.email,name:'Invited',password:'synthetic-password',acceptedTerms:true,invitation:'wrong'}),/Invitation/);assert.equal(calls,0);
  await assert.rejects(hostedAccountAction(req,{action:'login',email:identity.email,password:'synthetic-password'}),/through this application/);
- assert.equal((await (await hostedAccountAction(req,{action:'signup',email:identity.email,name:'Invited',password:'synthetic-password',invitation:'synthetic-invite'})).json()).verificationRequired,true);
- const verified=await hostedAccountAction(req,{action:'verify',email:identity.email,code:'123456'}),body=await verified.json();assert.equal(body.account.email,identity.email);assert.doesNotMatch(JSON.stringify(body),/synthetic-access|synthetic-refresh/);const cookie=verified.headers.get('set-cookie');assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.match(cookie,/SameSite=Strict/);
+ assert.equal((await (await hostedAccountAction(req,{action:'signup',email:identity.email,name:'Invited',password:'synthetic-password',acceptedTerms:true,invitation:'synthetic-invite'})).json()).verificationRequired,true);
+ const confirmation=await hostedAccountAction(req,{action:'confirm',type:'signup',tokenHash:'a'.repeat(64)});assert.equal((await confirmation.json()).verified,true);assert.equal(confirmation.headers.get('set-cookie'),null);
+ const verified=await hostedAccountAction(req,{action:'login',email:identity.email,password:'synthetic-password'}),body=await verified.json();assert.equal(body.account.email,identity.email);assert.doesNotMatch(JSON.stringify(body),/synthetic-access|synthetic-refresh/);const cookie=verified.headers.get('set-cookie');assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.match(cookie,/SameSite=Strict/);
  assert.equal((await (await hostedAccountAction(req,{action:'recover',email:identity.email})).json()).recoveryRequired,true);
- await hostedAccountAction(req,{action:'reset',email:identity.email,code:'123456',newPassword:'new-synthetic-password'});assert.equal(accountFromRequest(new Request(req.url,{headers:{cookie}})),null);
+ await assert.rejects(hostedAccountAction(req,{action:'reset',newPassword:'new-synthetic-password'}),/recovery link/);
+ const recovery=await hostedAccountAction(req,{action:'confirm',type:'recovery',tokenHash:'b'.repeat(64)});
+ const recoveryRequest=new Request(req.url,{headers:{cookie:recovery.headers.get('set-cookie')}});
+ await hostedAccountAction(recoveryRequest,{action:'reset',newPassword:'new-synthetic-password'});
+ await assert.rejects(hostedAccountAction(recoveryRequest,{action:'reset',newPassword:'new-synthetic-password'}),/expired/);assert.equal(accountFromRequest(new Request(req.url,{headers:{cookie}})),null);
  global.fetch=async()=>{throw new Error('Provider offline');};assert.equal((await (await hostedAccountAction(req,{action:'logout'})).json()).signedOut,true);
 });
 test('subscription gate rejects suspended and unpaid accounts before new-entry authorization',async()=>{
  process.env.PENGUIN_REQUIRE_SUBSCRIPTION='1';process.env.STRIPE_PRICE_ID='price_configured';process.env.STRIPE_WEBHOOK_SECRET='synthetic-webhook';
- global.fetch=async url=>url.includes('/admin/users/')?Response.json(user):Response.json([{status:'past_due',price_id:'price_configured'}]);await assert.rejects(requireTradingPlan(session.account.id),/active subscription/);
+ global.fetch=async url=>url.includes('/admin/users/')?Response.json(user):Response.json([{status:'past_due',price_id:'price_configured',access_until:Math.floor(Date.now()/1000)+3600}]);await assert.rejects(requireTradingPlan(session.account.id),/active subscription/);
  global.fetch=async()=>Response.json({...user,banned_until:new Date(Date.now()+86400000).toISOString()});await assert.rejects(requireTradingPlan(session.account.id),/suspended/);
- global.fetch=async url=>url.includes('/admin/users/')?Response.json(user):Response.json([{status:'active',price_id:'price_configured'}]);await assert.doesNotReject(requireTradingPlan(session.account.id));delete process.env.PENGUIN_REQUIRE_SUBSCRIPTION;
+ global.fetch=async url=>url.includes('/admin/users/')?Response.json(user):Response.json([{status:'active',price_id:'price_configured',access_until:Math.floor(Date.now()/1000)+3600}]);await assert.doesNotReject(requireTradingPlan(session.account.id));delete process.env.PENGUIN_REQUIRE_SUBSCRIPTION;
 });

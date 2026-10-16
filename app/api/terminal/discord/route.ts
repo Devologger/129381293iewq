@@ -5,7 +5,7 @@ export async function POST(request:Request){if(process.env.PENGUIN_ACCOUNT_MODE=
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 async function handleGET() {
-  return Response.json({ configured: Boolean(credential("DISCORD_PUBLIC_KEY")), commands: ["/obsidian help", "/obsidian link", "/obsidian status", "/obsidian positions", "/obsidian pause", "/obsidian resume"] });
+  return Response.json({ configured: Boolean(credential("DISCORD_PUBLIC_KEY")), commands: ["/penguin help", "/penguin link", "/penguin status", "/penguin positions", "/penguin pause", "/penguin resume"] });
 }
 
 export const GET=withAccount(handleGET);

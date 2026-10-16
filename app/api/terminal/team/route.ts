@@ -1,3 +1,4 @@
+import {requireAiAccess,aiAccess,aiAccessResponse} from '@/lib/server/ai-access';
 import {currentAccount} from "@/lib/server/account-context";
 import {withAccount} from "@/lib/server/accounts";
 import {saveAiRouting} from '@/lib/server/free-cloud';
@@ -6,8 +7,8 @@ import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session
 export const runtime = "nodejs";
 async function handleGET(request: Request) {
   if (!ownerSession(request)) return Response.json({ error: "Unlock private settings in Connections first" }, { status: 401 });
-  try { const id = workspaceSession(request).id; return Response.json({ budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES, comparisons: routeComparisons(id), comparisonRoutes: currentAccount()?COMPARISON_ROUTES.filter(r=>!["freeride","nine_router"].includes(r.id)):COMPARISON_ROUTES }, { headers: { "Cache-Control": "no-store" } }); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
+  try { const id = workspaceSession(request).id; return Response.json({ ai:await aiAccess(), budget: budgetStatus(), runs: teamRuns(id), settings: teamSettings(id), contexts: researchContexts(id), roles: TEAM_ROLES, comparisons: routeComparisons(id), comparisonRoutes: currentAccount()?COMPARISON_ROUTES.filter(r=>!["freeride","nine_router"].includes(r.id)):COMPARISON_ROUTES }, { headers: { "Cache-Control": "no-store" } }); }
+  catch (error) { const access=aiAccessResponse(error);if(access)return access;return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
 }
 async function handlePOST(request: Request) {
   try { sameOrigin(request); } catch { return Response.json({ error: "Same-origin access required" }, { status: 403 }); }
@@ -15,6 +16,7 @@ async function handlePOST(request: Request) {
   try {
     const text = await request.text(); if (text.length > 5000) throw new Error("Payload too large");
     const data = JSON.parse(text), id = workspaceSession(request).id;
+    if(["run","enable","diagnose","compare"].includes(data.action)||(data.action==="settings"&&data.enabled===true))await requireAiAccess();
     if (data.action === "compare") return Response.json(await compareRoutes(id, data.routes));
     if (data.action === "routing") return Response.json({provider:saveAiRouting(data.provider),message:"Free router saved. Existing encrypted keys are reused; no paid fallback or accounting reset."});
     if (data.action === "budget") return Response.json({ budget: saveDailyCallLimit(data.dailyCalls), message: "Daily allowance saved. Existing usage and uncertain reservations are preserved." });
@@ -28,7 +30,7 @@ async function handlePOST(request: Request) {
     if (data.action === "settings") return Response.json(saveTeamSettings(id, data));
     if (data.action === "run" && typeof data.contextKey === "string" && (data.escalation === undefined || typeof data.escalation === "boolean")) return Response.json(await runTeam(id, data.contextKey, data.question, data.escalation === true));
     throw new Error("Unsupported team action");
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team action failed" }, { status: 400 }); }
+  } catch (error) { const access=aiAccessResponse(error);if(access)return access;return Response.json({ error: error instanceof Error ? error.message : "Team action failed" }, { status: 400 }); }
 }
 
 export const GET = withAccount(handleGET);

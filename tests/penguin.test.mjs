@@ -70,7 +70,7 @@ test('truncation and reasoning-only responses are accounted once and explain the
 });
 test('bounded output allowance reaches the provider and completes reviews; invalid cap blocks calls',async()=>{
  process.env.TEAM_AI_PROVIDER='freeride';process.env.TEAM_DAILY_CALL_LIMIT='30';process.env.TEAM_MAX_OUTPUT_TOKENS='4000';
- try {let calls=0;const fetcher=async(url,options)=>{calls++;const request=JSON.parse(options.body);assert.equal(request.max_tokens,4000);assert.match(request.messages[0].content,/at most 220 words/);return Response.json({usage:{prompt_tokens:10,completion_tokens:40},choices:[{finish_reason:'stop',message:{content:'Complete bounded review.'}}]});};
+ try {let calls=0;const fetcher=async(url,options)=>{calls++;const request=JSON.parse(options.body);assert.equal(request.max_tokens,4000);assert.match(request.messages[0].content,/at most 160 words/);return Response.json({usage:{prompt_tokens:10,completion_tokens:40},choices:[{finish_reason:'stop',message:{content:'Complete bounded review.'}}]});};
  const run=await runTeam(workspace(),context,'Configured allowance',false,fetcher);assert.equal(run.status,'COMPLETE');assert.equal(calls,3);
  process.env.TEAM_MAX_OUTPUT_TOKENS='4001';assert.throws(()=>budgetConfig(),/256 to 4000/);await assert.rejects(runTeam(workspace(),context,'Invalid output cap',false,fetcher),/256 to 4000/);assert.equal(calls,3);
  } finally {delete process.env.TEAM_AI_PROVIDER;delete process.env.TEAM_DAILY_CALL_LIMIT;delete process.env.TEAM_MAX_OUTPUT_TOKENS;}

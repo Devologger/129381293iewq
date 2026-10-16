@@ -21,8 +21,8 @@ export async function discordInteraction(request: Request) {
     if (!userId || !/^\d{5,25}$/.test(userId)) return reply("Discord user identity is missing.");
     if (command === "link") {
       const code = interaction.data.options[0].options?.find((o: { name: string }) => o.name === "code")?.value;
-      if (typeof code !== "string" || !/^[a-f\d]{32}$/.test(code)) return reply("Use /obsidian link code:<one-time code from Connections>.");
-      try { linkDiscord(userId, code); return reply("Workspace linked. /obsidian status and /obsidian positions now read your linked workspace. Historical paper records remain archived."); }
+      if (typeof code !== "string" || !/^[a-f\d]{32}$/.test(code)) return reply("Use /penguin link code:<one-time code from Connections>.");
+      try { linkDiscord(userId, code); return reply("Workspace linked. /penguin status and /penguin positions now read your linked workspace. Historical paper records remain archived."); }
       catch (error) { return reply(error instanceof Error ? error.message : "Account linking failed"); }
     }
     const id = discordWorkspace(userId);
@@ -36,6 +36,6 @@ export async function discordInteraction(request: Request) {
     }
     if (command === "positions") return reply(ws.portfolio.positions.length ? ws.portfolio.positions.map(p => `${p.symbol} ${p.side} · ${p.exchange}/${p.market}/${p.source} · entry ${p.entry.toFixed(4)} · size $${p.collateral.toFixed(2)}`).join("\n") : "No open paper positions.");
     if (command === "status") return reply(`BINANCE DEMO: ${demoBots(id).filter(b=>b.enabled).length} bots enabled. ${demoBots(id).map(b=>`${b.symbol}: ${b.error||b.updatedAt||"waiting for worker"}`).join("; ")}. Historical paper engine: ${ws.portfolio.paused ? "paused" : "enabled"}. Cash: $${ws.portfolio.cash.toFixed(2)}. Open positions: ${ws.portfolio.positions.length}. Closed trades: ${ws.portfolio.fills.length}. Bots: ${ws.bots.filter(b => b.enabled).length}. Last worker cycle: ${ws.lastWorkerAt || "waiting for first cycle"}.${ws.workerError ? " A market feed needs attention; inspect the dashboard." : ""}`);
-    return reply("Use /obsidian help for supported paper commands.");
+    return reply("Use /penguin help for supported commands.");
   } catch { return Response.json({ error: "Invalid interaction" }, { status: 400 }); }
 }

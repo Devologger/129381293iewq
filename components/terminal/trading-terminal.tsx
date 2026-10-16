@@ -46,7 +46,8 @@ const EMPTY_LEVELS: { price: number; label: string; confirmed: boolean }[] = [];
 export function TradingTerminal({ initialView = "terminal" }: { initialView?: View }) {
   const [view, setView] = useState<View>(initialView);
   const [accountReady,setAccountReady]=useState(false);
-  useEffect(()=>{let active=true;void fetch("/api/account").then(r=>r.json()).then(data=>{if(!active)return;if(data.requireLogin&&!data.account){window.location.replace("/account");return;}setAccountReady(true);}).catch(()=>{if(active)setAccountReady(true);});return()=>{active=false;};},[]);
+  const [accountError,setAccountError]=useState("");
+  useEffect(()=>{let active=true;const controller=new AbortController();void fetch("/api/account",{signal:controller.signal}).then(async r=>{const data=await r.json();if(!r.ok)throw new Error(data.error||"Account service unavailable");return data;}).then(data=>{if(!active)return;if(!data.account){window.location.replace("/");return;}setAccountReady(true);}).catch(error=>{if(active)setAccountError(error instanceof Error?error.message:"Account service unavailable");});return()=>{active=false;controller.abort();};},[]);
   const [mobileMenu, setMobileMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -73,7 +74,7 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
   const [chartDrawings,setChartDrawings]=useState<Record<string,ChartDrawing[]>>({});
   const [watchlist, setWatchlist] = useState(["BTC", "ETH", "SOL", "XRP"]);
   const [source, setSource] = useState<"demo" | "exchange">("exchange");
-  const liveFeeds=useLiveFeeds({exchange,market,symbols:watchlist.includes(symbol)?watchlist:[symbol,...watchlist.slice(0,7)],timeframe,source});
+  const liveFeeds=useLiveFeeds({exchange,market,symbols:watchlist.includes(symbol)?watchlist:[symbol,...watchlist.slice(0,7)],timeframe,source:accountReady?source:"demo"});
   const live=liveFeeds[symbol]||{data:null,error:"",checkedAt:0};
   const [liveNow,setLiveNow]=useState(0);
   useEffect(()=>{const tick=()=>setLiveNow(Date.now()),initial=setTimeout(tick,0),timer=setInterval(tick,1000);return()=>{clearTimeout(initial);clearInterval(timer);};},[]);
@@ -119,13 +120,14 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
     if(!restoredContext.current){restoredContext.current=true;const active=data.bots.find(b=>b.scanning)||data.bots.find(b=>b.enabled);if(active){setExchange(active.exchange);setMarket(active.market);setTimeframe(active.timeframe);setSymbol(active.symbol);setSource(active.source);}}
   }, []);
   useEffect(() => {
+    if(!accountReady)return;
     const controller = new AbortController();
     let loading=false;
     const load = async () => {
       if(loading||document.hidden)return;loading=true;
       try {
         const response = await fetch("/api/terminal/workspace", { signal: controller.signal });
-        if (!response.ok) { const failure=await response.json();if(failure.signInRequired){window.location.replace("/account");return;}throw new Error("Persistent workspace is unavailable"); }
+        if (!response.ok) { const failure=await response.json();if(failure.signInRequired){window.location.replace("/");return;}throw new Error("Persistent workspace is unavailable"); }
         const data = await response.json();
         if (!controller.signal.aborted) { applyWorkspace(data); setLoaded(true); }
       } catch (error) { if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Workspace load failed"); } finally{loading=false;}
@@ -134,7 +136,7 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
     const timer = setInterval(load, 5000);
     fetch("/api/terminal/discord").then(r => r.json()).then(d => setDiscord(d.configured)).catch(() => {});
     return () => { controller.abort(); clearInterval(timer); };
-  }, [applyWorkspace]);
+  }, [applyWorkspace,accountReady]);
   async function workspaceAction(payload: Record<string, unknown>) {
     if (!loaded) throw new Error("Wait for the persistent workspace to load");
     const response = await fetch("/api/terminal/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -186,13 +188,14 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
   }, [exchange, market, timeframe, source, watchlist,symbol]);
 
   useEffect(() => {
+    if(!accountReady)return;
     const controller = new AbortController();
     const timer = setTimeout(() => { void refresh(controller.signal); }, 0);
     let loading=false;const update=async()=>{if(loading||document.hidden)return;loading=true;try{await refresh(controller.signal);}finally{loading=false;}};
     const poll = setInterval(() => { void update(); }, 30000);
     const visible=()=>{if(!document.hidden)void update();};document.addEventListener("visibilitychange",visible);
     return () => { controller.abort(); clearTimeout(timer); clearInterval(poll);document.removeEventListener("visibilitychange",visible); };
-  }, [refresh]);
+  }, [refresh,accountReady]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -262,7 +265,7 @@ export function TradingTerminal({ initialView = "terminal" }: { initialView?: Vi
     </section>;
   };
 
-  if(!accountReady)return <div className="penguin-loading" role="status">◈ Connecting your workspace…</div>;
+  if(!accountReady)return <div className="penguin-loading" role="status">{accountError?<div><p>{accountError}</p><button className="ot-secondary" onClick={()=>window.location.reload()}>Retry connection</button> <Link href="/">Home</Link></div>:"◈ Connecting your workspace…"}</div>;
   return <div className="ot-root penguin-hud penguin-compact penguin-minimal penguin-professional">
     <aside className="ot-sidebar" tabIndex={0} aria-label="Workspace sidebar">
       <Link href="/terminal" className="ot-brand"><div className="ot-brand-mark">◈</div><div>PENGUIN<small>INTELLIGENT TRADING</small></div></Link>

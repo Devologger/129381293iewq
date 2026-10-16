@@ -1,3 +1,6 @@
+import {accountContext} from '@/lib/server/account-context';
+import {aiAccess} from '@/lib/server/ai-access';
+import {isAdmin} from '@/lib/server/admin';
 import {hostedEnabled} from '@/lib/server/hosted';
 import {hostedAccountAction} from '@/lib/server/hosted-auth';
 import {resolveHostedAccount} from '@/lib/server/accounts';
@@ -5,7 +8,7 @@ import {accountFromRequest,signupPolicy,rateLimitAuth,signupAccount,loginAccount
 import {cookieHeader,sameOrigin} from '@/lib/server/session';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
-export async function GET(request:Request){try{return Response.json({account:hostedEnabled()?await resolveHostedAccount(request):accountFromRequest(request),...signupPolicy()},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({error:'Hosted account service unavailable. Try again shortly.'},{status:503});}}
+export async function GET(request:Request){try{const account=hostedEnabled()?await resolveHostedAccount(request):accountFromRequest(request);let access={allowed:false,reason:'Sign in to use AI features.',admin:false};if(account){try{access=await accountContext.run(account,()=>aiAccess());}catch{access={allowed:false,reason:'Subscription status unavailable. Try again shortly.',admin:false};}}return Response.json({account,ai:access,admin:account?isAdmin(account):false,...signupPolicy()},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({error:'Hosted account service unavailable. Try again shortly.'},{status:503});}}
 export async function POST(request:Request){
  try{sameOrigin(request);}catch{return Response.json({error:'Same-origin access required'},{status:403});}
  const origin=process.env.TERMINAL_PUBLIC_ORIGIN||new URL(request.url).origin;

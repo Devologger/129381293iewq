@@ -1,3 +1,4 @@
+import {ADMIN_EMAIL} from './admin.ts';
 import {hostedEnabled,hostedIdentity,supabase,sealSecret,openSecret,loadHostedSecrets,remoteSecrets} from './hosted.ts';
 import {DatabaseSync} from 'node:sqlite';
 import {randomBytes,createHash,scrypt as scryptCallback,timingSafeEqual} from 'node:crypto';
@@ -29,7 +30,7 @@ function validPassword(value:unknown):asserts value is string{if(typeof value!==
 async function passwordHash(password:string){const salt=randomBytes(16).toString('hex');return salt+':'+(await scrypt(password,salt,64) as Buffer).toString('hex');}
 async function passwordMatches(password:string,stored:string){const [salt,digest]=stored.split(':');const actual=await scrypt(password,salt,64) as Buffer;return /^[a-f\d]{128}$/.test(digest||'')&&timingSafeEqual(actual,Buffer.from(digest,'hex'));}
 function session(account:AccountIdentity){const token=randomBytes(32).toString('hex'),connection=accountsDb();connection.prepare('DELETE FROM hosted_sessions WHERE token_hash IN (SELECT token_hash FROM account_sessions WHERE expires<?)').run(Date.now());connection.prepare('DELETE FROM account_sessions WHERE expires<?').run(Date.now());connection.prepare('INSERT INTO account_sessions VALUES (?,?,?)').run(hash(token),account.id,Date.now()+TTL);return {account,token};}
-export function signupPolicy(){return {hosted:hostedEnabled(),open:process.env.PENGUIN_OPEN_SIGNUP==='1',invitationRequired:process.env.PENGUIN_OPEN_SIGNUP!=='1'&&Boolean(process.env.PENGUIN_SIGNUP_CODE),enabled:process.env.PENGUIN_OPEN_SIGNUP==='1'||Boolean(process.env.PENGUIN_SIGNUP_CODE),requireLogin:hostedEnabled()||process.env.PENGUIN_ACCOUNT_MODE==='1'};}
+export function signupPolicy(){const open=process.env.PENGUIN_OPEN_SIGNUP==='1'||(process.env.PENGUIN_OPEN_SIGNUP!=='0'&&!process.env.PENGUIN_SIGNUP_CODE);return {hosted:hostedEnabled(),open,invitationRequired:!open&&Boolean(process.env.PENGUIN_SIGNUP_CODE),enabled:open||Boolean(process.env.PENGUIN_SIGNUP_CODE),requireLogin:hostedEnabled()||process.env.PENGUIN_ACCOUNT_MODE==='1'};}
 export function rateLimitAuth(identity:string,maximum=10){
  const connection=accountsDb(),now=Date.now(),key=hash(identity);connection.exec('BEGIN IMMEDIATE');
  try{connection.prepare('DELETE FROM auth_limits WHERE expires<?').run(now);const row=connection.prepare('SELECT attempts FROM auth_limits WHERE identity=?').get(key) as {attempts:number}|undefined;
@@ -39,7 +40,7 @@ export function rateLimitAuth(identity:string,maximum=10){
 export async function signupAccount(input:{email:unknown;name:unknown;password:unknown;invitation?:unknown}){
  const policy=signupPolicy();if(!policy.enabled)throw new Error('Registration is disabled. The operator must configure invitation access.');
  if(!policy.open&&(typeof input.invitation!=='string'||!timingSafeEqual(Buffer.from(hash(input.invitation)),Buffer.from(hash(process.env.PENGUIN_SIGNUP_CODE||'')))))throw new Error('Invitation code is invalid');
- const email=emailAddress(input.email);validPassword(input.password);
+ const email=emailAddress(input.email);if(email===ADMIN_EMAIL)throw new Error('This administrator address is reserved for secure server setup');validPassword(input.password);
  if(typeof input.name!=='string'||!input.name.trim()||input.name.length>80)throw new Error('Use a name of 1–80 characters');
  const row:AccountIdentity={id:randomBytes(16).toString('hex'),workspaceId:randomBytes(24).toString('hex'),email,name:input.name.trim()};
  const password=await passwordHash(input.password);
@@ -105,3 +106,22 @@ export function revokeAccountSessions(id:string){accountsDb().prepare('DELETE FR
 
 export function enrollHostedEmail(email:string){accountsDb().prepare('INSERT OR IGNORE INTO hosted_enrollments VALUES (?,?)').run(email.trim().toLowerCase(),Date.now());}
 export function requireHostedEnrollment(email:string){if(!accountsDb().prepare('SELECT email FROM hosted_enrollments WHERE email=?').get(email.trim().toLowerCase()))throw new Error('Create your Penguin account through this application first. An invitation may be required.');}
+
+export function rememberRecovery(user:Parameters<typeof hostedIdentity>[0],tokens:{access_token:string}){
+ const account=hostedIdentity(user),connection=accountsDb(),token=randomBytes(32).toString('hex');
+ connection.exec('CREATE TABLE IF NOT EXISTS hosted_recovery(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,encrypted TEXT NOT NULL,expires INTEGER NOT NULL)');
+ connection.prepare('DELETE FROM hosted_recovery WHERE expires<? OR user_id=?').run(Date.now(),account.id);
+ connection.prepare('INSERT INTO hosted_recovery VALUES (?,?,?,?)').run(hash(token),account.id,sealSecret(account.id,'recovery',JSON.stringify({access_token:tokens.access_token})),Date.now()+900000);
+ return token;
+}
+export function recoveryFromRequest(request:Request){
+ const token=request.headers.get('cookie')?.split(';').map(v=>v.trim()).find(v=>v.startsWith('penguin_recovery='))?.slice('penguin_recovery='.length);
+ if(!token||!/^[a-f\d]{64}$/.test(token))throw new Error('Open a fresh password recovery link from your email');
+ const connection=accountsDb();connection.exec('CREATE TABLE IF NOT EXISTS hosted_recovery(token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,encrypted TEXT NOT NULL,expires INTEGER NOT NULL)');
+ const row=connection.prepare('SELECT user_id,encrypted FROM hosted_recovery WHERE token_hash=? AND expires>?').get(hash(token),Date.now()) as {user_id:string;encrypted:string}|undefined;
+ if(!row)throw new Error('Recovery link expired. Request a new one');
+ return {id:row.user_id,key:hash(token),...JSON.parse(openSecret(row.user_id,'recovery',row.encrypted))} as {id:string;key:string;access_token:string};
+}
+export function consumeRecovery(key:string){accountsDb().prepare('DELETE FROM hosted_recovery WHERE token_hash=?').run(key);}
+export const POLICY_VERSION='2026-10-17';
+export function recordConsent(email:string){accountsDb().exec('CREATE TABLE IF NOT EXISTS policy_consents(email TEXT PRIMARY KEY,version TEXT NOT NULL,accepted INTEGER NOT NULL)');accountsDb().prepare('INSERT INTO policy_consents VALUES (?,?,?) ON CONFLICT(email) DO UPDATE SET version=excluded.version,accepted=excluded.accepted').run(email.toLowerCase(),POLICY_VERSION,Date.now());}

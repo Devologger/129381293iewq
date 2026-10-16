@@ -1,3 +1,4 @@
+import {aiAccessResponse} from '@/lib/server/ai-access';
 import {withAccount} from "@/lib/server/accounts";
 import { runTeam } from "@/lib/server/agent-team";
 import { ownerSession, sameOrigin, workspaceSession } from "@/lib/server/session";
@@ -12,7 +13,7 @@ async function handlePOST(request: Request) {
     const run = await runTeam(workspaceSession(request).id, data.contextKey);
     if (run.status !== "COMPLETE") return Response.json({ error: run.error }, { status: 502 });
     return Response.json({ note: run.messages.at(-1)?.text, advisory_only: true, run });
-  } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
+  } catch (error) { const access=aiAccessResponse(error);if(access)return access;return Response.json({ error: error instanceof Error ? error.message : "Team unavailable" }, { status: 400 }); }
 }
 
 export const POST = withAccount(handlePOST);

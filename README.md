@@ -1,4 +1,5 @@
-> **Current interface:** Penguin now uses a professional workspace with Overview, Markets, Research, Knowledge, and Settings. JARVIS voice has been retired; **Ask Penguin** offers text AI help through the same free-route usage ledger. Optional Supabase accounts/encrypted secrets and Stripe subscriptions are implemented; they require your own privately configured services. Read [Hosted setup and release limits](docs/HOSTED-SETUP.md). Earlier voice instructions below are historical and no longer apply. Real Binance remains read-only; no profitability claim is established.
+> **Current launch workflow:** Public animated landing page and open registration; hosted email/password accounts confirm and recover through links, with no code-entry flow. All customer AI requires an active subscription, enforced server-side; the reserved administrator is created privately using `npm run admin:setup` after Supabase configuration. Start with [the backend, Supabase, Stripe and Discord guide](docs/LAUNCH-GUIDE.md), or `/setup` in the app. The existing app uses one durable server; commercial legal/operational prerequisites and real service validation remain outstanding. Earlier OTP/voice instructions below are historical.
+
 
 # Penguin Trading Workspace
 
